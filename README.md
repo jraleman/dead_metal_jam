@@ -1,6 +1,20 @@
-# DeathMetalJam
+# DeadMetalJam
 
-...
+## About
+
+Inspired by [Typing of the Dead](https://youtu.be/Zs3M6oDcPlU?t=174),
+but instead of a keyboard you use your musical instrument,
+and instead of zombies, you kill some mean robots :)
+
+### Modes
+
+There are three modes available:
+
+
+- Demo     (use metronome, stop time 'til user hits the beat)
+- Rythm    (notes pitch are irrelevant)
+- Jam      (standard)
+
 
 ## .JAM files
 
