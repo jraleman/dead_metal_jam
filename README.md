@@ -6,6 +6,9 @@ Inspired by [Typing of the Dead](https://youtu.be/Zs3M6oDcPlU?t=174),
 but instead of a keyboard you use your musical instrument,
 and instead of zombies, you kill some mean robots :)
 
+Or maybe based similar to [SUPERHOT](https://www.youtube.com/watch?v=vrS86l_CtAY),
+aesthetics wise.
+
 ### Modes
 
 There are three modes available:
