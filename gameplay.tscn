@@ -1,0 +1,69 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/game/game_shell.tscn" id="1_shell"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/gameplay.gd" id="2_script"]
+
+[node name="DeadMetalJam" instance=ExtResource("1_shell")]
+script = ExtResource("2_script")
+
+[node name="DmjPrompt" type="Control" parent="HUD"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="HUD/DmjPrompt"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Layout" type="VBoxContainer" parent="HUD/DmjPrompt/Center"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="DmjPromptCaption" type="Label" parent="HUD/DmjPrompt/Center/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+text = "PLAY THIS NOTE"
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="DmjTarget" type="Label" parent="HUD/DmjPrompt/Center/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+text = "…"
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.686275, 0.866667, 0.917647, 1)
+theme_override_font_sizes/font_size = 150
+
+[node name="DmjHeard" type="Label" parent="HUD/DmjPrompt/Center/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+mouse_filter = 2
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.94902, 0.968627, 0.976471, 1)
+theme_override_font_sizes/font_size = 22
+
+[node name="DmjStatus" type="Label" parent="HUD/DmjPrompt/Center/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(560, 0)
+layout_mode = 2
+mouse_filter = 2
+text = "Measuring the room. Stay quiet for a moment."
+horizontal_alignment = 1
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 16

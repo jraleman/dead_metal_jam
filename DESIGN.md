@@ -9,7 +9,7 @@
 > build targets Linux / Windows / macOS; the other two follow, and nothing in
 > this design may foreclose them.
 > **Location:** this repository is checked out at
-> `dcs_games/godot-base/games/dead-metal-jam/` — one self-contained game folder
+> `dcs_games/godot-base/games/dead_metal_jam/` — one self-contained game folder
 > beside `target_rush` and `slice_and_slash`, discovered by `GameCatalog` at
 > startup.
 > **This document covers gameplay systems only.** Menus, settings persistence,
@@ -265,9 +265,11 @@ func _create_capture_bus() -> void:
     var index := AudioServer.bus_count
     AudioServer.add_bus(index)
     AudioServer.set_bus_name(index, "Instrument")
-    # Critical: never route the live mic back to Master, or the player's
-    # speakers feed the player's microphone and the room howls.
-    AudioServer.set_bus_mute(index, true)
+    # Critical: never let the live mic reach the speakers, or the player's
+    # output feeds the player's microphone and the room howls. Bus volume is
+    # applied *after* the effect chain, so the analyser still sees full-scale
+    # audio while nothing is audible.
+    AudioServer.set_bus_volume_db(index, -80.0)
     _capture = AudioEffectCapture.new()
     _capture.buffer_length = 0.1
     AudioServer.add_bus_effect(index, _capture)
@@ -281,6 +283,17 @@ func _create_capture_bus() -> void:
 
 Input device selection uses `AudioServer.get_input_device_list()` and the
 `AudioServer.input_device` property, both surfaced in Soundcheck.
+
+**Detecting a dead microphone — the trap.** `AudioEffectCapture` taps the
+**bus**, not the device. When the OS refuses the microphone (Windows privacy
+settings, no device, a browser permission denial) the bus keeps producing
+frames and the capture keeps handing them over, all of them zero. **"No frames
+arrived" is therefore not a usable failure signal, and the obvious guard never
+fires.** The signal that does work is *perfect digital silence* across the
+calibration window: a working microphone always has self-noise, so an exactly
+zero peak means nothing is connected. That is what Soundcheck tests, and it
+reports the cause rather than showing a flat meter (see the web note below —
+the failure mode to design against is a silent one).
 
 **Pulling samples.** Each frame, drain what is available and hand it to the
 detector:
@@ -331,7 +344,9 @@ which is exactly the "tell a C from an E" requirement.
 
 **Pipeline, per hop:**
 
-1. **Mono-sum** the `PackedVector2Array`, subtract a running DC offset.
+1. **Mono-sum** the `PackedVector2Array`, subtract the window mean. Removing
+   the mean is an exact DC notch and needs no state, so the per-window entry
+   point stays pure and the unit test stays deterministic.
 2. **Decimate 44100 → 11025 Hz**, 4:1, with a short box pre-filter to avoid
    aliasing. Nyquist at 11 kHz is ~5.5 kHz, far above the highest fundamental
    we accept, and it cuts the inner-loop cost by 4×.
@@ -339,22 +354,57 @@ which is exactly the "tell a C from an E" requirement.
    silence and skip the rest. This is what keeps room hum from firing the gun.
 4. **NSDF** over a **512-sample window** (~46 ms) with a **256-sample hop**
    (~23 ms), evaluated only across the lag range implied by the playable pitch
-   range — **E2 (82.4 Hz) to C6 (1046.5 Hz)** → lags **10 to 134** at 11025 Hz.
-   That is ~64k multiply-adds per hop, ~43 hops/sec. Tractable in GDScript on a
-   worker thread; measure it in the first spike and fall back to a 1024-sample
-   window at a lower hop rate if the numbers disagree.
+   range — **E2 (82.4 Hz) to C6 (1046.5 Hz)** — plus **a semitone of headroom
+   at each end**, giving lags **9 to 142** at 11025 Hz. The headroom is not
+   optional: without it a guitar tuned 30 cents flat needs lag 136 and a range
+   stopping at E2 exactly stops at 134, so the low string simply goes unheard.
+   That is ~64k multiply-adds per hop, ~43 hops/sec. The lag bounds are derived
+   from the capture rate at runtime, so a 48 kHz driver widens them to 10–155
+   rather than detuning every reading.
 5. **Peak pick** with MPM's threshold rule — first peak at or above
    `k · max_peak` with `k = 0.9` — then **parabolic interpolation** around it
-   for sub-sample lag precision.
+   for sub-sample lag precision. The threshold compares peaks *after*
+   interpolation. Comparing raw NSDF samples instead silently loses the top
+   octave: A5 is only 12.5 samples per period, so its true peak falls between
+   two samples and reads ~0.85, while the peak at twice the lag lands almost
+   exactly on a sample and reads ~1.0 — and the real note fails the threshold
+   against its own harmonic.
 6. `f0 = 11025.0 / interpolated_lag`; `confidence` = the NSDF value at that peak.
 7. **Convert:** `midi = 69.0 + 12.0 * log(f0 / 440.0) / log(2.0)`,
    `cents_off = (midi - round(midi)) * 100.0`.
-8. **Stabilise:** median-of-3 across hops, plus an explicit octave-error check
-   (if the peak at half the lag is nearly as strong, prefer the lower octave).
-9. **Onset:** emit `note_started` when short-window RMS exceeds its trailing
-   average by the onset ratio *and* a refractory period (~60 ms) has elapsed
-   *and* pitch has been stable for two hops. Re-articulation of the same pitch
-   must fire a new event — a repeated note is a repeated shot.
+8. **Stabilise:** median-of-3 across hops. There is deliberately **no separate
+   octave-correction pass** — see the measured result below.
+9. **Onset:** emit `note_started` when the same note has been stable for two
+   hops, a refractory period (~60 ms) has elapsed, *and* either the note
+   **changed** or the hop's RMS exceeds its trailing average by the onset
+   ratio. A change of pitch needs no loudness test — something was played by
+   definition. The loudness test exists solely for re-articulation of the note
+   already sounding, which pitch alone cannot see: a repeated note is a
+   repeated shot.
+
+**Measured, not assumed.** The detector and its corpus were built first
+(Milestone 1) and the numbers below come from running it, not from estimating:
+
+| Result | Measurement |
+| --- | --- |
+| Note identification | 0 errors across E2–C6, sine/saw/square, 2 phases each |
+| Tuning accuracy | ≤1.2 cents E2–E4, ≤6 cents to E5, ≤7 cents to C6 |
+| Intonation tracking | ≤2 cents error E2–E4, ≤6 to E5, ≤10 at C6 |
+| Confidence on clean input | ≥0.94 |
+| Confidence on white noise | 0.0 — noise is never reported as a note |
+| Cost | **2.2 ms per window** against a 23.2 ms hop budget — 10%, measured in Godot 4.7.2 |
+
+Accuracy falls off with pitch because C6 is only ~10.5 samples per period once
+decimated. That is well inside the ±50 cents a semitone allows, so it does not
+affect matching, but the tuner readout is correspondingly coarser up there.
+
+**An octave-correction pass was written, measured and removed.** The intent was
+to catch notes whose fundamental is weak or missing. Against the corpus it
+rescued *nothing* — MPM's first-peak rule already handles a missing fundamental
+and fundamentals down to 5% strength — while pushing A5 and C6 down an octave,
+because a parabola is a poor fit to an NSDF peak only ~11 samples wide. Taking
+the **first** peak above the threshold, rather than the strongest, is the whole
+octave defence, and it is sufficient.
 
 **Octave-insensitive matching is the default.** Gameplay compares
 `pitch_class` (0–11), not absolute MIDI number. Octave errors are the single
@@ -404,6 +454,24 @@ Two consequences, both designed for rather than papered over:
 
 Mobile web is the worst case on this table — a browser audio path on a phone —
 and it is the last target, not the first, for exactly that reason (§4.7).
+
+**What ships today.** `input/mic_capture.gd` (`MicCapture`) owns the bus, the
+device, calibration and the self-test; both the standalone tuner and the round
+scene use it, so there is one implementation of the audio plumbing rather than
+two that drift. Two decisions came out of building it:
+
+- **A self-test tone.** `MicCapture.toggle_test_tone()` injects a 220 Hz sine
+  straight into the capture bus, reachable with `T` in both the tuner and the
+  round. A silent microphone and a broken analyser look identical from the
+  player's side of the screen, and this is what tells them apart — it is also
+  the only way the pitch path can be verified on a machine with no working
+  input device, which is the situation this game was developed on.
+- **The countdown waits for the soundcheck, not the other way round.** The
+  round starts on the framework's schedule so the shell's round bookkeeping
+  stays intact, and `_update_round()` holds `%RoundTimer` paused until the room
+  has been measured. Deferring the round start itself was tried first and
+  broke the shared contract in `game_shell_test.gd`, which requires
+  `_begin_first_round()` to actually begin one.
 
 ### 4.7 Platform ladder
 
@@ -711,21 +779,23 @@ Everything lives under one self-contained folder. `GameCatalog` discovers it at
 startup by globbing `games/*/game.gd`.
 
 ```
-godot-base/games/dead-metal-jam/
-  game.gd                      # static manifest() -> GameManifest
+godot-base/games/dead_metal_jam/
+  game.gd                      # ✅ static manifest() -> GameManifest
   game.cfg                     # colours, assets, music — the only base customisation (see 9.9)
   dead_metal_jam_options.gd    # class_name, CONSTANTS ONLY (see 9.4)
-  dead_metal_jam.tscn          # inherited scene of scenes/game/game_shell.tscn
-  dead_metal_jam.gd            # extends GameShell
+  gameplay.tscn                # ✅ inherited scene of scenes/game/game_shell.tscn
+  gameplay.gd                  # ✅ extends GameShell
   input/
     note_event.gd              # class_name NoteEvent
     note_source.gd             # class_name NoteSource (abstract base)
     midi_note_source.gd
+    mic_capture.gd             # ✅ class_name MicCapture — bus, device, calibration, self-test
     mic_note_source.gd
     keyboard_note_source.gd
     touch_note_source.gd       # post-jam, mobile (see 4.5 / 4.7)
     web_midi_bridge.gd         # post-jam, web only (see 4.2 / 4.7)
-    pitch_detector.gd          # class_name PitchDetector — pure DSP, no autoloads
+    pitch_detector.gd          # ✅ class_name PitchDetector — pure DSP, no autoloads
+    pitch_analysis.gd          # ✅ class_name PitchAnalysis — one hop's result
     note_router.gd             # class_name NoteRouter
   chart/
     jam_chart.gd               # class_name JamChart extends Resource
@@ -737,6 +807,7 @@ godot-base/games/dead-metal-jam/
     enemy_bot.gd  + .tscn
     note_glyph.gd
   ui/
+    tuner.tscn + .gd           # ✅ standalone soundcheck / tuner, runnable on its own
     note_readout.tscn + .gd
     soundcheck.tscn + .gd
     share_art.tscn + .gd       # game-owned share card art
@@ -744,18 +815,25 @@ godot-base/games/dead-metal-jam/
     audio/                     # track audio and game SFX referenced by game.cfg
     images/
   tests/
-    pitch_detector_test.gd
+    pitch_detector_test.gd     # ✅
     note_router_test.gd
     jam_chart_test.gd
 ```
 
-**Folder name vs. game id.** The folder is hyphenated because it is a checkout
-of the `DeadMetalJam` repository; the manifest id stays snake_case
-(`dead_metal_jam`) like the other two games. That divergence is safe:
-`GameCatalog` globs `games/*/game.gd` and then keys everything by
-`manifest.id`, and `GameShell.game_id()` is only ever a manifest lookup — no
-framework code builds a path from it. Keep the id snake_case regardless, since
-it is also a `project.godot` key (`share/stats_urls/<id>`).
+✅ marks what exists today. `gameplay.gd` / `gameplay.tscn` follow
+`target_rush`; the folder name matches the manifest id, as in the other two
+games, so nothing has to reconcile the two. The id is also a `project.godot`
+key (`share/stats_urls/<id>`), which is the reason it stays snake_case.
+
+**Trying it without the menu.** The tuner scene runs on its own, which is the
+fastest way to check a microphone or a new instrument:
+
+```
+godot --path godot-base res://games/dead_metal_jam/ui/tuner.tscn
+godot --path godot-base res://games/dead_metal_jam/ui/tuner.tscn -- --selftest
+```
+
+`T` toggles the self-test tone in either scene, `Esc` leaves.
 
 ### 9.2 Manifest
 
@@ -763,12 +841,12 @@ it is also a `project.godot` key (`share/stats_urls/<id>`).
 game.id = "dead_metal_jam"
 game.title = "Dead Metal Jam"
 game.tagline = "Play the note. Kill the robot."
-game.gameplay_scene_path = "res://games/dead-metal-jam/dead_metal_jam.tscn"
+game.gameplay_scene_path = "res://games/dead_metal_jam/gameplay.tscn"
 game.menu_order = 2
 game.supports_multiplayer = false          # one instrument, one player
 game.supports_cpu_opponent = false
 game.control_style = GameManifest.CONTROL_STYLE_TARGETS
-game.share_art_scene_path = "res://games/dead-metal-jam/ui/share_art.tscn"
+game.share_art_scene_path = "res://games/dead_metal_jam/ui/share_art.tscn"
 game.tunables = DeadMetalJamOptions.TUNABLES
 game.copy = { ... }                        # mode-select and instructions wording
 game.achievements = { ... }                # see 9.6
@@ -842,7 +920,7 @@ the third settings row that came with it.
 | # | Touchpoint | Status |
 | --- | --- | --- |
 | 1 | `settings_menu.tscn` + `_configure_game_tunables()` — two new rows | **Required.** Documented existing coupling; down from three now that lives are shared. |
-| 2 | `project.godot` — `audio/driver/enable_input=true` | **Required.** Data, not a code branch, and correct on every platform: it only asks the audio driver to open an input, which desktop, mobile and web all support. |
+| 2 | `project.godot` — `audio/driver/enable_input=true` | **Done.** Data, not a code branch, and correct on every platform: it only asks the audio driver to open an input, which desktop, mobile and web all support. |
 | 3 | Export presets — desktop for the jam; web, Android and iOS added later, with the platform record permission | **Required, later** (§4.7). Data. The base already exports to all three unchanged, so this adds presets rather than changing the project. |
 | 4 | `project.godot` — `share/stats_urls/dead_metal_jam` | **Required.** Data. Keep the URL ≤ 42 UTF-8 bytes or the QR stops scanning. |
 | 5 | `game_manifest.gd` + `game_catalog.gd` — read `games/<folder>/game.cfg` | **Recommended** (§9.9). ~35 lines total, game-agnostic, optional per game. This is the customisation surface for every future game, not a Dead Metal Jam feature. |
@@ -851,8 +929,9 @@ the third settings row that came with it.
 | 8 | `share_card_art.gd` | **Avoided** — using `share_art_scene_path` with a game-owned scene instead of adding a third hardcoded style. |
 | 9 | `audio_manager.gd` | **Avoided** — the game synthesises its own SFX locally and plays them through the existing `play_sfx()` pool, rather than adding game-specific synthesis to the autoload the way Desk-Can-Saw did. |
 | 10 | `default_bus_layout.tres` | **Avoided** — the Instrument bus is created at runtime (§4.3). |
-| 11 | Web MIDI shim, touch onset source | **Avoided as a framework change** — both are `NoteSource` files inside `games/dead-metal-jam/input/` (§4.7). Reaching a new platform costs the base nothing. |
-| 12 | `router.gd`, `game_shell.tscn`, `menu_screen.gd`, theme | **Untouched.** |
+| 11 | Web MIDI shim, touch onset source | **Avoided as a framework change** — both are `NoteSource` files inside `games/dead_metal_jam/input/` (§4.7). Reaching a new platform costs the base nothing. |
+| 12 | `instructions_video_test.gd` — allow a game with no walkthrough clip | **Done.** The screen already supports this (`_setup_video()` hides the card and falls back to the single-column layout); only the test insisted every catalogued game ship footage, which made "add a game" mean "record a video first". The assertion now follows the code: declare a clip and it must be your own clip and poster, declare none and the card must give way to the text. Coverage went up, not down — two games must still ship clips. |
+| 13 | `router.gd`, `game_shell.tscn`, `menu_screen.gd`, theme | **Untouched.** |
 
 ### 9.6 Achievements
 
@@ -909,7 +988,11 @@ framework change.
   square buffers at known frequencies across E2–C6 and assert the detected
   MIDI number, including deliberately detuned inputs to check `cents_off`.
   This is the test that matters most, and it is fully deterministic because
-  the detector is pure.
+  the detector is pure. It also covers the streaming path — chunked, ragged,
+  stereo and 48 kHz input all have to agree with one contiguous buffer — the
+  noise floor and silence gates, onset counting, and it prints the measured
+  cost per window so a regression in speed is visible even though speed is not
+  asserted.
 - `tests/note_router_test.gd` — source merging, dedupe, latency offset,
   and the zero-source case.
 - `tests/jam_chart_test.gd` — chart resources load, sections are ordered, beat
@@ -932,7 +1015,7 @@ One small, deliberately narrow addition closes that gap.
 **One optional file per game, three sections, nothing else.**
 
 ```ini
-; games/dead-metal-jam/game.cfg
+; games/dead_metal_jam/game.cfg
 [colors]
 ink    = "0b1013"   ; darkest background          (base: 0e1519)
 deep   = "131c21"   ; panels                      (base: 162128)
@@ -943,14 +1026,14 @@ muted  = "93a6b0"   ; secondary text              (base: 93a6b0)
 danger = "ff3b30"   ; enemies and damage only     (base: ff4964)
 
 [assets]
-icon       = "res://games/dead-metal-jam/assets/images/icon.svg"
-background = "res://games/dead-metal-jam/assets/images/rail_backdrop.png"
-share_art  = "res://games/dead-metal-jam/ui/share_art.tscn"
+icon       = "res://games/dead_metal_jam/assets/images/icon.svg"
+background = "res://games/dead_metal_jam/assets/images/rail_backdrop.png"
+share_art  = "res://games/dead_metal_jam/ui/share_art.tscn"
 
 [music]
-menu     = "res://games/dead-metal-jam/assets/audio/menu_loop.ogg"
-gameplay = "res://games/dead-metal-jam/assets/audio/track_01.ogg"
-results  = "res://games/dead-metal-jam/assets/audio/results.ogg"
+menu     = "res://games/dead_metal_jam/assets/audio/menu_loop.ogg"
+gameplay = "res://games/dead_metal_jam/assets/audio/track_01.ogg"
+results  = "res://games/dead_metal_jam/assets/audio/results.ogg"
 ```
 
 **The contract**
@@ -1122,10 +1205,10 @@ porting something that is not yet fun is the classic way to lose a jam.
 
 | # | Milestone | Proves |
 | --- | --- | --- |
-| 1 | `PitchDetector` + its unit test, standalone. Synthesised buffers in, MIDI numbers out, across E2–C6. | **The entire concept.** If this is not reliable, everything downstream is worthless. Do not proceed past it. |
-| 2 | `NoteRouter` + all three desktop sources + the note readout, in a bare scene. Play an instrument, watch the letter change. | The input stack end to end, and it is already a usable tuner. |
-| 3 | Latency measurement on real hardware; Soundcheck calibration. | That the mic path can hit a ±60 ms window at all. |
-| 4 | The game folder, manifest, inherited shell scene, one lane, one Rust Drone, score wiring. | The framework integration, and that `game_shell_test.gd` still passes. |
+| 1 | ✅ **Done.** `PitchDetector` + its unit test, standalone. Synthesised buffers in, MIDI numbers out, across E2–C6. | **The entire concept.** If this is not reliable, everything downstream is worthless. Do not proceed past it. **Result: 0 note errors, ≤7 cents, 2.2 ms against a 23.2 ms budget — go.** |
+| 2 | 🟡 **Mic source done.** `MicCapture` + the pitch readout in a standalone tuner scene (`ui/tuner.tscn`); play an instrument, watch the letter change. MIDI and keyboard sources, and the `NoteRouter` that fronts all three, are still outstanding. | The input stack end to end, and it is already a usable tuner. |
+| 3 | Noise-floor calibration ships as the soundcheck; **latency measurement on real hardware is still owed** — no instrument has met this build yet. | That the mic path can hit a ±60 ms window at all. |
+| 4 | 🟡 **Integration done, content not.** Folder, manifest, inherited shell scene and score wiring are live: the game is in the menu, calls a note, scores hits and misses, and the shared suite passes. Lanes and the Rust Drone are still outstanding. | The framework integration, and that `game_shell_test.gd` still passes. |
 | 5 | Damage: `_lose_life()` on a bot that fires, `_player_is_out()` gating, the wind-up telegraph, and `TRACK CLEARED` early end. Verified under **both** round modes. | The fail state — and that the game never branches on the round mode. |
 | 6 | Rail advance, sections, three lanes, the full MVP roster. | Pacing. |
 | 7 | Demo and Rhythm modes. | That the mode flags really are flags. |
@@ -1139,11 +1222,12 @@ porting something that is not yet fun is the classic way to lose a jam.
 
 | Risk | Mitigation |
 | --- | --- |
-| GDScript NSDF is too slow at 43 hops/sec | Measured in milestone 1, before anything depends on it. Fallbacks in order: larger window at a lower hop rate → worker thread → 8 kHz decimation → GDExtension. |
+| ~~GDScript NSDF is too slow at 43 hops/sec~~ | **Retired in milestone 1.** Measured in Godot at 2.2 ms per window against a 23.2 ms budget — ~10× headroom, before any of the planned fallbacks. The 1024-sample fallback and the worker thread are both still available if a phone disagrees. |
 | Mic latency makes the ±60 ms Perfect window unreachable | Calibration (§4.6); if real hardware says otherwise, widen the tiers — they are tuning constants, not architecture. |
 | Acoustic feedback (speakers → mic) triggers phantom notes | Capture bus is muted and never routed to Master (§4.3); Soundcheck measures the noise floor with the game's own music playing. |
 | `InputEvent.device` not populated for MIDI on 4.7 | Verified in milestone 2; degrades to all-devices. |
-| Distorted electric guitar defeats the detector | The harmonic-rich case is in the milestone-1 test corpus. Rhythm mode is the honest fallback and ships in MVP for exactly this reason. |
+| Distorted electric guitar defeats the detector | Harmonic-rich waveforms and fundamentals down to 5% strength are in the milestone-1 corpus and pass, but synthesis is not a real amp — this only clears once milestone 2 runs a live signal through it. Rhythm mode is the honest fallback and ships in MVP for exactly this reason. |
+| **Onsets were tuned on synthetic attacks** | The onset rule (§4.4 step 9) is verified for behaviour — one note fires once, a re-pluck fires again, silence never fires — but its thresholds have never met a real decay envelope. Milestone 2's Soundcheck is where they get their real values, and they are constants for that reason. |
 | Players cannot read notation | The game never shows notation — letters only. Demo mode exists as the on-ramp, and Mirror Units teach by ear. |
 | **Jam deadline eats the game** | Milestone 1 is a hard gate and milestones 9–10 are outside the jam. If the schedule slips, the roster shrinks (§8.2 already marks three enemies stretch) and the chart count drops to one — the platform ladder is never the thing that gets rushed. |
 | **No native Web MIDI in Godot** | Known and confirmed, not a surprise to be discovered late (§4.2). Web still has the mic and keyboard paths, so a browser build is playable *before* the shim exists; the shim only restores the exact path. |
@@ -1157,6 +1241,9 @@ porting something that is not yet fun is the classic way to lose a jam.
 
 | Revision | Change |
 | --- | --- |
+| 6 | **The game is in the menu.** `game.gd`, `gameplay.gd` and the inherited `gameplay.tscn` landed, so Dead Metal Jam is a real catalogued game: it calls a note, listens, and scores hits and misses by pitch class (any octave counts). Audio plumbing was extracted to `MicCapture` and is now shared with a standalone tuner scene (§9.1), and a **self-test tone** was added because the machine this was built on has no working microphone — §4.3 gained the reason the obvious dead-mic guard does not work. Integration cost two framework findings: `_begin_first_round()` **must** start a round, so the soundcheck now holds the countdown instead of delaying the round (§4.6); and `instructions_video_test.gd` demanded a walkthrough clip from every game even though the screen already supports going without one, which made adding any game require recording a video first (§9.5, row 12). Milestones 2 and 4 are part-done (§12) — the framework half is finished, the content half is not. |
+| 5 | Folder renamed `dead-metal-jam` → **`dead_metal_jam`** to match `slice_and_slash` and `target_rush`, and so the folder name matches the manifest id. All `res://` paths updated. Milestone 1 was then **executed in Godot 4.7.2 for the first time** rather than only in the Python reference port: the suite passes and the real cost is **2.2 ms per window, 10% of the hop budget** — better than the 4 ms the port predicted, so the accuracy and cost figures in §4.4 are now measurements of the shipping code. |
+| 4 | **Milestone 1 built and measured**, and §4.4 rewritten to match what the code actually does rather than what was guessed. Three changes were forced by measurement: the lag range gained a semitone of headroom at each end (a guitar 30 cents flat was falling off the bottom), the peak threshold now compares *interpolated* peaks (raw comparison loses the top octave to its own harmonic), and **the octave-correction pass was removed** — it rescued nothing and broke A5/C6. DC removal became window-mean subtraction so the per-window entry point stays pure. Added the measured accuracy and cost table, marked the milestone done in §12, and retired the "too slow" risk in favour of a new one: onset thresholds are still synthetic. |
 | 3 | Platform scope widened: **web and mobile are in scope, desktop ships first.** The first build is a proof of concept for a game jam, so "MVP" now means *the jam build*. Added §4.7, the platform ladder, with the per-platform input matrix and the two rules that keep the jam build from foreclosing the other targets; added the web Web-MIDI-shim and mobile touch-onset sources (§4.2, §4.5); documented the web and mobile microphone constraints (§4.3). "Web and mobile export" moved out of *Cut* and to the top of *Stretch*, with matching build-order milestones (9–10) and risk rows. |
-| 2 | Rewritten against the base project as it now stands. **Lives are no longer game-owned** — `dcs_games` ships them as a shared round mode, so §7 became an integration spec (four calls) instead of a system spec, the `game/jam_lives` tunable and the game-owned lives strip were deleted, and the "no way to end a round early" friction point shrank to the `TRACK CLEARED` case (§7.4). Paths updated for the move to `godot-base/games/dead-metal-jam/`. Added §9.9, the `game.cfg` presentation config — the one sanctioned way to customise the base's colours, assets and music as more games arrive. |
+| 2 | Rewritten against the base project as it now stands. **Lives are no longer game-owned** — `dcs_games` ships them as a shared round mode, so §7 became an integration spec (four calls) instead of a system spec, the `game/jam_lives` tunable and the game-owned lives strip were deleted, and the "no way to end a round early" friction point shrank to the `TRACK CLEARED` case (§7.4). Paths updated for the move to `godot-base/games/dead_metal_jam/`. Added §9.9, the `game.cfg` presentation config — the one sanctioned way to customise the base's colours, assets and music as more games arrive. |
 | 1 | Initial design draft. |
