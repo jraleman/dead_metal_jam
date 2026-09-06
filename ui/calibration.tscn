@@ -1,0 +1,103 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://games/dead_metal_jam/ui/calibration.gd" id="1_script"]
+
+[node name="Calibration" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.054902, 0.082353, 0.098039, 1)
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 56
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 56
+theme_override_constants/margin_bottom = 40
+
+[node name="Layout" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Heading" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+text = "DEAD METAL JAM — LATENCY CALIBRATION"
+theme_override_colors/font_color = Color(0.686275, 0.866667, 0.917647, 1)
+theme_override_font_sizes/font_size = 22
+
+[node name="Status" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Starting capture…"
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="Spacer" type="Control" parent="Margin/Layout"]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+
+[node name="Readout" type="HBoxContainer" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Reading" type="Label" parent="Margin/Layout/Readout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "—"
+theme_override_colors/font_color = Color(0.984314, 0.94902, 0.87451, 1)
+theme_override_font_sizes/font_size = 120
+
+[node name="Units" type="Label" parent="Margin/Layout/Readout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 8
+text = ""
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 20
+
+[node name="Progress" type="ProgressBar" parent="Margin/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+max_value = 12.0
+show_percentage = false
+
+[node name="Spacer2" type="Control" parent="Margin/Layout"]
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+
+[node name="Detail" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Not calibrated yet."
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.984314, 0.94902, 0.87451, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="Filler" type="Control" parent="Margin/Layout"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Hint" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Esc quits"
+theme_override_colors/font_color = Color(0.427451, 0.490196, 0.529412, 1)
+theme_override_font_sizes/font_size = 14

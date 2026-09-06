@@ -38,6 +38,34 @@ var rms := 0.0
 ## leaves it false.
 var is_onset := false
 
+## The smoothed loudness [member rms] was compared against when deciding
+## [member is_onset], captured *before* this hop updated it.
+##
+## Diagnostic rather than gameplay state: `rms / trailing_rms` is the exact
+## quantity [constant PitchDetector.ONSET_RMS_RATIO] gates on, and it cannot be
+## recovered afterwards because a batch of hops can be analysed between two
+## reads of the detector. [OnsetLog] uses it to retune the constant against a
+## real instrument. 0.0 from the single-window path.
+var trailing_rms := 0.0
+
+## How many consecutive hops this note had held when [member is_onset] was
+## decided, judged against [constant PitchDetector.ONSET_STABLE_HOPS]. The
+## other half of why a hop did or did not fire. 0 when unvoiced.
+var stable_hops := 0
+
+## Index, counted in input-rate samples since the detector was last reset, of
+## the *end* of the window this hop analysed — the earliest moment the detector
+## could possibly have known about it.
+##
+## This is the game's clock. Wall-clock time is far too coarse to time a note
+## against: it is quantised to the frame the buffer happened to be drained on,
+## which is worth tens of milliseconds against a ±60 ms judgement window. The
+## sample counter is exact and immune to a dropped frame, so latency
+## calibration (§4.6) and, later, chart timing both key off it.
+##
+## -1 from [method PitchDetector.analyse_window], which has no stream to count.
+var sample_index := -1
+
 
 func _to_string() -> String:
 	if not voiced:

@@ -1,0 +1,108 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://games/dead_metal_jam/ui/input_check.gd" id="1_script"]
+
+[node name="InputCheck" type="Control"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.054902, 0.082353, 0.098039, 1)
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 32
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 32
+
+[node name="Layout" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Heading" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+text = "DEAD METAL JAM — INPUT CHECK"
+theme_override_colors/font_color = Color(0.686275, 0.866667, 0.917647, 1)
+theme_override_font_sizes/font_size = 22
+
+[node name="Sources" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Starting…"
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 15
+
+[node name="MidiDetail" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "MIDI: checking…"
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 15
+
+[node name="Level" type="ProgressBar" parent="Margin/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+max_value = 100.0
+show_percentage = false
+
+[node name="Spacer" type="Control" parent="Margin/Layout"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+
+[node name="LastNote" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "—"
+theme_override_colors/font_color = Color(0.964706, 0.933333, 0.847059, 1)
+theme_override_font_sizes/font_size = 64
+
+[node name="NoteDetail" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Play something: an instrument, a MIDI keyboard, or A S D F G H J."
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.686275, 0.866667, 0.917647, 1)
+theme_override_font_sizes/font_size = 17
+
+[node name="Spacer2" type="Control" parent="Margin/Layout"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+
+[node name="History" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 14
+
+[node name="Stats" type="Label" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+text = ""
+theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_font_sizes/font_size = 14
+
+[node name="Help" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+text = "Z / X octave   ·   F2 microphone self-test   ·   F5 rescan MIDI   ·   Esc quit"
+theme_override_colors/font_color = Color(0.415686, 0.470588, 0.505882, 1)
+theme_override_font_sizes/font_size = 14

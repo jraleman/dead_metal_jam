@@ -20,6 +20,15 @@ signal calibrated(noise_floor: float)
 ## Emitted when no usable audio is arriving. Carries a player-facing reason.
 signal capture_failed(reason: String)
 
+enum ToneMode {
+	OFF,
+	## A held note, for checking the readout and the analyser.
+	CONTINUOUS,
+	## Silence until [method pluck_now], for rehearsing anything that has to
+	## time a note — calibration especially.
+	PLUCKS,
+}
+
 const BUS_NAME := "DMJCapture"
 const SILENT_DB := -80.0
 
@@ -33,6 +42,18 @@ const TEST_TONE_HZ := 220.0
 
 ## Gate used during the self-test, where there is no room tone to measure.
 const TEST_TONE_FLOOR := 0.005
+
+## Queue the held tone runs on. Generous, because nothing about it is timed.
+const TEST_TONE_BUFFER := 0.25
+
+## Queue the pluck self-test runs on. Deliberately short: whatever is sitting in
+## it is added to every simulated note's latency, so a large buffer would make
+## a rehearsal of the calibration screen measure the buffer instead.
+const PLUCK_BUFFER := 0.05
+
+## Long enough for the detector to settle on the note and fire its onset, short
+## enough to be gone before the next beat of a calibration metronome.
+const PLUCK_SECONDS := 0.28
 
 ## Bounds for the measured gate: high enough to ignore hum, low enough to still
 ## hear a softly fingerpicked string.
@@ -49,6 +70,8 @@ var _calibration_peak := 0.0
 var _tone_player: AudioStreamPlayer
 var _tone_playback: AudioStreamGeneratorPlayback
 var _tone_phase := 0.0
+var _tone_mode := ToneMode.OFF
+var _pending_pluck := PackedFloat32Array()
 
 
 func _ready() -> void:
@@ -116,27 +139,38 @@ func toggle_test_tone() -> bool:
 		_restart_calibration()
 		return false
 
-	var generator := AudioStreamGenerator.new()
-	generator.mix_rate = AudioServer.get_mix_rate()
-	generator.buffer_length = 0.25
-
-	_tone_player = AudioStreamPlayer.new()
-	_tone_player.stream = generator
-	_tone_player.bus = BUS_NAME
-	add_child(_tone_player)
-	_tone_player.play()
-	_tone_playback = _tone_player.get_stream_playback()
-
-	_failed = false
-	_calibrating = false
-	if _capture:
-		_capture.clear_buffer()
-	calibrated.emit(TEST_TONE_FLOOR)
+	_open_tone_generator(TEST_TONE_BUFFER)
+	_tone_mode = ToneMode.CONTINUOUS
 	return true
+
+
+## Opens the same synthetic path as [method toggle_test_tone] but silent, so
+## the caller decides when notes happen.
+##
+## This is what lets latency calibration be rehearsed with no microphone and no
+## instrument: the plucks arrive at times the caller chose, so the number the
+## screen produces can be checked against the number it should produce.
+func start_test_plucks() -> void:
+	if _tone_player:
+		_stop_test_tone()
+	_open_tone_generator(PLUCK_BUFFER)
+	_tone_mode = ToneMode.PLUCKS
+
+
+## Queues one plucked note, starting with the next samples pushed. Replaces any
+## pluck still sounding, so a fast passage cannot pile up.
+func pluck_now(midi := 55) -> void:
+	if _tone_mode != ToneMode.PLUCKS:
+		return
+	_pending_pluck = _render_pluck(PitchDetector.midi_to_frequency(float(midi)))
 
 
 func test_tone_active() -> bool:
 	return _tone_player != null
+
+
+func test_tone_mode() -> int:
+	return _tone_mode
 
 
 ## Note the self-test tone should be reported as, for checking the readout.
@@ -197,14 +231,78 @@ func _measure_noise_floor(frames: PackedVector2Array) -> void:
 	)
 
 
+## Feeds the synthetic path. Both modes push every frame the generator will
+## take, so the queue length — and therefore the delay before an injected note
+## is heard — stays predictable.
 func _feed_test_tone() -> void:
 	if _tone_playback == null:
 		return
-	var increment := TEST_TONE_HZ / AudioServer.get_mix_rate()
+
+	if _tone_mode == ToneMode.CONTINUOUS:
+		var increment := TEST_TONE_HZ / AudioServer.get_mix_rate()
+		for _i in _tone_playback.get_frames_available():
+			var sample := sin(_tone_phase * TAU) * 0.5
+			_tone_playback.push_frame(Vector2(sample, sample))
+			_tone_phase = fmod(_tone_phase + increment, 1.0)
+		return
+
+	var taken := 0
 	for _i in _tone_playback.get_frames_available():
-		var sample := sin(_tone_phase * TAU) * 0.5
-		_tone_playback.push_frame(Vector2(sample, sample))
-		_tone_phase = fmod(_tone_phase + increment, 1.0)
+		var value := 0.0
+		if taken < _pending_pluck.size():
+			value = _pending_pluck[taken]
+			taken += 1
+		_tone_playback.push_frame(Vector2(value, value))
+	if taken > 0:
+		_pending_pluck = _pending_pluck.slice(taken)
+
+
+## A plucked string: harmonics under a fast attack and an exponential decay.
+## The envelope is what makes it usable for timing — a note that simply
+## switches on has no moment that can be called its start.
+func _render_pluck(frequency: float) -> PackedFloat32Array:
+	var rate := AudioServer.get_mix_rate()
+	var count := int(rate * PLUCK_SECONDS)
+	var samples := PackedFloat32Array()
+	samples.resize(count)
+
+	var attack := rate * 0.004
+	for i in count:
+		var seconds := float(i) / rate
+		var envelope := exp(-seconds * 4.0)
+		if float(i) < attack:
+			envelope *= float(i) / attack
+		var value := 0.0
+		for harmonic in range(1, 6):
+			value += (
+				sin(TAU * frequency * float(harmonic) * seconds)
+				/ float(harmonic)
+			)
+		samples[i] = value * envelope * 0.35
+
+	return samples
+
+
+func _open_tone_generator(buffer_length: float) -> void:
+	var generator := AudioStreamGenerator.new()
+	generator.mix_rate = AudioServer.get_mix_rate()
+	generator.buffer_length = buffer_length
+
+	_tone_player = AudioStreamPlayer.new()
+	_tone_player.stream = generator
+	_tone_player.bus = BUS_NAME
+	add_child(_tone_player)
+	_tone_player.play()
+	_tone_playback = _tone_player.get_stream_playback()
+
+	# The synthetic path has a known floor, so there is no room to measure and
+	# nothing downstream should wait for one.
+	_failed = false
+	_calibrating = false
+	_pending_pluck = PackedFloat32Array()
+	if _capture:
+		_capture.clear_buffer()
+	calibrated.emit(TEST_TONE_FLOOR)
 
 
 func _restart_calibration() -> void:
@@ -224,6 +322,8 @@ func _stop_test_tone() -> void:
 	_tone_player.queue_free()
 	_tone_player = null
 	_tone_playback = null
+	_tone_mode = ToneMode.OFF
+	_pending_pluck = PackedFloat32Array()
 
 
 ## Measurement is over, just not successfully, so anything waiting on the

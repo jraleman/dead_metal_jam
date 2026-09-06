@@ -87,15 +87,143 @@ const ONSET_REFRACTORY_SECONDS := 0.06
 ## How much louder than the recent average a hop must be to count as a fresh
 ## attack on the note already sounding. Only re-plucks need this; a *change* of
 ## note is an onset on its own.
-const ONSET_RMS_RATIO := 1.8
+##
+## **Measured, not guessed.** A string re-struck while still ringing adds to
+## what is already there rather than replacing it, so the jump is far smaller
+## than a note from silence: 1.3x to 1.6x is typical, not the 2x a fresh pluck
+## suggests. The original 1.8 missed four of six re-plucks. It is safe this low
+## only because of the arm/re-arm rule below — without hysteresis a threshold
+## this sensitive would retrigger on the sustain.
+const ONSET_RMS_RATIO := 1.4
 
-## How fast the trailing loudness average follows the signal. Slow enough to
-## still be low when an attack arrives, fast enough to settle during a note.
-const TRAILING_RMS_SMOOTHING := 0.25
+## How much louder than the recent *trough* a hop must be to count as an attack,
+## independently of the trailing average.
+##
+## The two tests catch different things. Against the average, a note starting
+## from near-silence is obvious. Against the recent trough, a string re-struck
+## while still ringing is obvious — the level barely changes across the whole
+## note, but the attack is a step up from the quietest moment just before it.
+##
+## The reference is a trough rather than the previous hop because an analysis
+## window is about twice a hop: a transient straddles two of them, so a
+## hop-to-hop comparison sees half the rise each time and can miss an attack
+## that is plainly there in the envelope. Measured on a re-plucked string at
+## 0.18 s spacing, hop-to-hop peaked at 1.10 while the same attack stood 1.26
+## above the trough it started from.
+##
+## Swept against the whole scenario set rather than picked: at 1.18 a tremolo
+## at 0.18 s lost two of six notes, and at 1.15 with a longer window a held
+## note grew a phantom second onset. This value with
+## [constant ONSET_RISE_WINDOW_HOPS] at 4 is the only combination that caught
+## every re-pluck without inventing one.
+const ONSET_RISE_RATIO := 1.15
+
+## Hops the trough reference looks back over. About 90 ms — long enough to sit
+## below a beating string's wobble, short enough that the reference follows a
+## decaying note down instead of holding a stale peak. Widening it to 6 traded
+## a caught tremolo note for a phantom onset on a sustained one.
+const ONSET_RISE_WINDOW_HOPS := 4
+
+## The level must fall back to this multiple of the trailing average, and stop
+## rising, before another attack can be recognised.
+##
+## One attack arms exactly one onset. Without this the level stays above the
+## threshold for several hops after a pluck and the refractory window is the
+## only thing standing between one note and an endless stream of them.
+## Comfortably above the ~1.0 a sustaining note sits at.
+const ONSET_RMS_REARM_RATIO := 1.15
+
+## Hops after an attack before it may fire an onset.
+##
+## An analysis window is [constant WINDOW_SIZE] samples — about twice a hop — so
+## for the first hop or two after a pluck the window still holds mostly the
+## audio that came *before* it, and the detector is still reporting the note
+## that was ringing. Firing there labels the new pluck with the old note and
+## then fires again when the new one resolves: six clean plucks measured seven
+## onsets, the first note doubled.
+##
+## Physically motivated rather than tuned: it is the window-straddle time. A
+## note starting from silence is unaffected, because it needs two stable hops
+## anyway and cannot supply them any sooner.
+const ONSET_ATTACK_SETTLE_HOPS := 2
+
+## Hops an attack stays usable once it has settled. The window from
+## [constant ONSET_ATTACK_SETTLE_HOPS] to here is the detector's chance to name
+## the note; past it the attack is stale and a fresh one is required.
+const ONSET_ATTACK_LATCH_HOPS := 6
+
+## Hops the trailing average is held still after an attack.
+##
+## Covers the transient so the reference cannot absorb the evidence for the very
+## attack it is measuring, and no longer — every extra hop frozen is a hop
+## before the trigger can re-arm for the next pluck.
+const ONSET_TRAILING_FREEZE_HOPS := 3
+
+## Consecutive unvoiced hops before the sounding note counts as released.
+##
+## One unvoiced hop in the middle of a note is a wobble in the analysis, not the
+## end of the note. Treating it as the end made the note look new when it came
+## back, which fired a second onset for a single pluck — six plucks measured
+## eleven onsets before this.
+const ONSET_RELEASE_HOPS := 2
+
+## How fast the trailing loudness average follows the signal.
+##
+## Fast enough that the reference settles onto a sustaining note within a few
+## hops, which is what lets the *next* pluck stand out against it. It is safe to
+## keep this quick only because the average is frozen while an attack is in
+## flight — see [method _update_trailing_rms]. Without that freeze, a reference
+## moving this fast absorbs the transient it exists to measure: at the original
+## symmetric 0.25 a string re-struck while still ringing peaked *below* the
+## threshold, and four of six re-plucks were missed.
+const TRAILING_RMS_SMOOTHING := 0.30
+
+## Floor under both attack ratios, so a hop of near-silence divided by a hop of
+## near-silence cannot read as an attack.
+const MIN_ATTACK_LEVEL := 0.001
+
+## How far above the calibrated room floor a hop must reach before it is allowed
+## to be an attack at all.
+##
+## Both attack tests are *ratios*, and a ratio is scale-free: noise drifting
+## from 0.02 to 0.03 is the same 1.5x step as a note starting from nothing, so
+## on its own the rule fires continuously on room tone. The voiced check is not
+## enough either — it compares against the floor measured during a quiet
+## calibration, while a player's room also contains handling, pick scrape and
+## the tails of notes already struck, all comfortably above it.
+##
+## So proportion says *something changed* and this says *there is a note here to
+## change*. Both must agree.
+##
+## Swept against the playing-technique corpus rather than guessed. At 1.0 and
+## 1.5 a decaying string's tail still put a phantom semitone neighbour into a
+## six-note phrase; at 3.0 a real fingerpicked note was swallowed. 2.0 and 2.5
+## both pass, so this sits between them instead of on either edge — the corpus
+## is synthesised, and a value that only just passes it would be a value tuned
+## to the model rather than to the instrument.
+const ONSET_NOISE_MARGIN := 2.25
 
 const NOTE_NAMES: Array[String] = [
 	"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ]
+
+
+## Typical delay between a note physically starting and the hop that reports it
+## as an onset, in seconds.
+##
+## **Measured, not derived.** `tests/latency_calibration_test.gd` synthesises
+## plucks at known samples and asserts the real figure stays within a hop of
+## this, so changing the window or the stability rule fails the test rather
+## than quietly invalidating the number.
+##
+## A formula was tried first and abandoned: a window turns voiced once the note
+## fills roughly a third of it, not half or all, so anything derived from the
+## window size overstates the delay by 15 ms or more.
+##
+## Only ever used to *report* — to tell a player which part of their measured
+## latency is this code and which part is their hardware. Judgement uses the
+## calibrated round trip (§4.6), never this.
+const TYPICAL_ONSET_DELAY_SECONDS := 0.042
 
 
 var _input_rate := DEFAULT_INPUT_RATE
@@ -109,9 +237,22 @@ var _raw := PackedFloat32Array()
 ## Decimated samples not yet consumed by a whole window.
 var _pending := PackedFloat32Array()
 var _recent_midi := PackedFloat32Array()
+## Decimated samples consumed by windows already emitted. Counted rather than
+## derived so a hop can be placed exactly on the input stream's own clock.
+var _work_consumed := 0
 ## Onset state. Only the streaming path maintains these; [method analyse_window]
 ## neither reads nor writes them.
 var _trailing_rms := 0.0
+## Hops an unspent attack has left to live; see [method _track_attack].
+var _attack_hops := 0
+## False between an attack and the level falling back to the sustain, so one
+## pluck cannot be counted twice.
+var _attack_armed := true
+## Consecutive unvoiced hops, so a one-hop wobble does not end the note.
+var _unvoiced_hops := 0
+## Previous hops' loudness, newest last, for the trough the rise test measures
+## against. Capped at [constant ONSET_RISE_WINDOW_HOPS].
+var _recent_rms: Array[float] = []
 var _hops_since_onset := 0
 var _stable_note := -1
 var _stable_hops := 0
@@ -148,7 +289,12 @@ func reset() -> void:
 	_raw = PackedFloat32Array()
 	_pending = PackedFloat32Array()
 	_recent_midi = PackedFloat32Array()
+	_work_consumed = 0
 	_trailing_rms = 0.0
+	_attack_hops = 0
+	_attack_armed = true
+	_unvoiced_hops = 0
+	_recent_rms.clear()
 	_hops_since_onset = _refractory_hops()
 	_stable_note = -1
 	_stable_hops = 0
@@ -203,11 +349,32 @@ func push_samples(samples: PackedFloat32Array) -> Array[PitchAnalysis]:
 	var results: Array[PitchAnalysis] = []
 	while _pending.size() >= WINDOW_SIZE:
 		var analysis := analyse_window(_pending.slice(0, WINDOW_SIZE))
+		# Decimation always consumes whole groups, so a decimated index maps
+		# back onto the input stream exactly rather than approximately.
+		analysis.sample_index = (_work_consumed + WINDOW_SIZE) * DECIMATION
 		_stabilise(analysis)
 		_mark_onset(analysis)
 		results.append(analysis)
 		_pending = _pending.slice(HOP_SIZE)
+		_work_consumed += HOP_SIZE
 	return results
+
+
+## Seconds of audio the detector has consumed, on the same clock as
+## [member PitchAnalysis.sample_index].
+func sample_index_to_seconds(index: int) -> float:
+	return float(index) / _input_rate
+
+
+## Smallest delay, in input-rate samples, between a note physically starting
+## and the hop that can first report it as an onset.
+##
+## See [constant TYPICAL_ONSET_DELAY_SECONDS]. What matters for calibration is
+## that this is *constant*: a fixed delay is measured once and subtracted
+## forever, where a delay that wandered with where the attack fell would put a
+## floor under timing accuracy that no tuning could lift.
+func typical_onset_delay_samples() -> int:
+	return int(round(TYPICAL_ONSET_DELAY_SECONDS * _input_rate))
 
 
 ## Box-filters and downsamples every whole group of [constant DECIMATION]
@@ -257,31 +424,160 @@ func _stabilise(analysis: PitchAnalysis) -> void:
 func _mark_onset(analysis: PitchAnalysis) -> void:
 	_hops_since_onset += 1
 
+	# Recorded before the smoothing below moves it, so the field holds the
+	# value this hop was actually judged against rather than the one the next
+	# hop will be.
+	analysis.trailing_rms = _trailing_rms
+
+	# Loudness is judged here — before the average is updated, and whether or
+	# not the pitch is nameable yet — because the first hop of a pluck is the
+	# loudest and the least identifiable. The verdict is latched and spent when
+	# the note settles a hop or two later.
+	_track_attack(analysis.rms)
+	_update_trailing_rms(analysis.rms)
+
 	if not analysis.voiced:
 		_stable_note = -1
 		_stable_hops = 0
-		_sounding_note = -1
-		_trailing_rms = lerpf(_trailing_rms, analysis.rms, TRAILING_RMS_SMOOTHING)
+		_unvoiced_hops += 1
+		if _unvoiced_hops >= ONSET_RELEASE_HOPS:
+			_sounding_note = -1
 		return
 
+	_unvoiced_hops = 0
 	if analysis.midi_note == _stable_note:
 		_stable_hops += 1
 	else:
 		_stable_note = analysis.midi_note
 		_stable_hops = 1
 
-	var attacked := analysis.rms > _trailing_rms * ONSET_RMS_RATIO
-	var changed := analysis.midi_note != _sounding_note
+	analysis.stable_hops = _stable_hops
+	# An onset always requires an attack. Accepting a bare change of note here
+	# instead — "the pitch is different, so it must be new" — was wrong in a way
+	# silence hid completely: with nothing to corroborate it, any wobble in the
+	# estimate becomes a note. Room tone drifts the reading a semitone and emits
+	# one. Worse, a real string sheds energy from its fundamental fastest, so
+	# partway through a long note the second harmonic is the loudest thing left
+	# and the estimator starts naming that instead — a phantom an octave up, on a
+	# note still loud enough to pass any noise gate. A real guitar produced a
+	# steady drip of exactly those, high and quiet, long after the player
+	# stopped.
+	#
+	# Only this path sees a microphone; keyboard and MIDI notes arrive already
+	# separated, through their own sources. So the question can be the physical
+	# one, and there is no need to also serve a synthesiser sliding between
+	# pitches at constant volume: you cannot start a note on a string without
+	# putting energy into it, and that includes fretted ones — a finger landing
+	# on a fret is a quiet attack, not an absent one.
 	if (
 		_stable_hops >= ONSET_STABLE_HOPS
 		and _hops_since_onset >= _refractory_hops()
-		and (changed or attacked)
+		and _attack_settled()
 	):
 		analysis.is_onset = true
 		_sounding_note = analysis.midi_note
 		_hops_since_onset = 0
+		# One attack is one note, however many hops it stays loud for.
+		_attack_hops = 0
+		# The average is frozen through an attack, so at this moment it still
+		# describes the silence *before* the note. Left to converge on its own it
+		# spends about five hops climbing, and for every one of those the ratio
+		# reads high enough to look like an ongoing attack — which holds the
+		# Schmitt trigger disarmed and makes the detector deaf to the next note.
+		# A fast run lost its second note exactly this way. Once a note has been
+		# accepted it *is* the background the next attack must beat, so say so.
+		_trailing_rms = analysis.rms
 
-	_trailing_rms = lerpf(_trailing_rms, analysis.rms, TRAILING_RMS_SMOOTHING)
+
+## Hops elapsed since the current attack was latched, or -1 when none is live.
+func _attack_age() -> int:
+	if _attack_hops <= 0:
+		return -1
+	return ONSET_ATTACK_LATCH_HOPS - _attack_hops
+
+
+## True when an attack is live *and* the analysis window has moved past the
+## audio that preceded it, so the note being reported is the one just played.
+func _attack_settled() -> bool:
+	return _attack_age() >= ONSET_ATTACK_SETTLE_HOPS
+
+
+## Arms on a rise past [constant ONSET_RMS_RATIO] and will not arm again until
+## the level has fallen back to [constant ONSET_RMS_REARM_RATIO] — a Schmitt
+## trigger on loudness. The latch then keeps the verdict alive for a few hops so
+## the pitch has time to settle without the attack expiring.
+func _track_attack(rms: float) -> void:
+	if _attack_hops > 0:
+		_attack_hops -= 1
+
+	var floor_level := maxf(_noise_floor, MIN_ATTACK_LEVEL)
+	var against_average := rms / maxf(_trailing_rms, floor_level)
+	var against_trough := rms / maxf(_rise_trough(), floor_level)
+	# Proportion alone cannot tell a note from noise that happens to be moving,
+	# because it is scale-free. Requiring the hop to also stand clear of the
+	# measured room is what separates "something got louder" from "something was
+	# played" — see ONSET_NOISE_MARGIN.
+	var audible := rms >= floor_level * ONSET_NOISE_MARGIN
+	var attacking := (
+		audible
+		and (against_average >= ONSET_RMS_RATIO or against_trough >= ONSET_RISE_RATIO)
+	)
+
+	if _attack_armed and attacking:
+		_attack_hops = ONSET_ATTACK_LATCH_HOPS
+		_attack_armed = false
+		# Loudness moves a hop or two before the pitch estimator lets go of the
+		# note that was already ringing, so at the moment of an attack the
+		# current reading still names the *old* note. Clearing the run forces
+		# the note to be re-established, and ONSET_ATTACK_SETTLE_HOPS keeps the
+		# attack unusable until the window has moved past the old audio.
+		_stable_note = -1
+		_stable_hops = 0
+		# This attack was measured against the history, so keeping it would leave
+		# the trough sitting below the new note and retrigger on the sustain.
+		# Filled rather than emptied: an empty window disables the trough test
+		# until it refills, which is a blind spot exactly where fast repeated
+		# notes live. Seeding it with the present level keeps the test live and
+		# lets the trough follow the new note down as it decays.
+		_seed_rise_history(rms)
+
+	elif not attacking and against_average <= ONSET_RMS_REARM_RATIO:
+		_attack_armed = true
+
+	_recent_rms.append(rms)
+	while _recent_rms.size() > ONSET_RISE_WINDOW_HOPS:
+		_recent_rms.remove_at(0)
+
+
+## Quietest of the last few hops — the level this note had settled to before
+## anything happened to it. Zero until enough history exists, which disables the
+## trough test rather than letting it fire on a single hop.
+func _rise_trough() -> float:
+	if _recent_rms.size() < ONSET_RISE_WINDOW_HOPS:
+		return 0.0
+	var lowest: float = _recent_rms[0]
+	for value in _recent_rms:
+		lowest = minf(lowest, value)
+	return lowest
+
+
+## Refills the window with one level, so the trough test stays live from the
+## next hop instead of going blind while history rebuilds.
+func _seed_rise_history(rms: float) -> void:
+	_recent_rms.clear()
+	for _i in ONSET_RISE_WINDOW_HOPS:
+		_recent_rms.append(rms)
+
+
+## The average follows the signal at one rate, but is held still for the first
+## few hops of an attack so it cannot absorb the transient the attack is
+## measured against. Once the freeze lifts it catches up to the new sustain
+## quickly, which is what re-arms the trigger in time for the next pluck.
+func _update_trailing_rms(rms: float) -> void:
+	var age := _attack_age()
+	if age >= 0 and age < ONSET_TRAILING_FREEZE_HOPS and rms > _trailing_rms:
+		return
+	_trailing_rms = lerpf(_trailing_rms, rms, TRAILING_RMS_SMOOTHING)
 
 
 ## The refractory window in hops, derived so it stays ~60 ms whatever rate the

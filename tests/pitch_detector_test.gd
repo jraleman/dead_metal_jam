@@ -39,6 +39,8 @@ const HARMONIC_LIMIT := 12
 ## of four hundred near-identical lines.
 const MAX_REPORTED_FAILURES := 20
 
+## Playing-technique signals are synthesised at a real capture rate, since they
+
 var _failures := PackedStringArray()
 var _failure_count := 0
 var _noise_state := 12345
@@ -458,6 +460,21 @@ func _test_onsets() -> void:
 		"Silence must never fire an onset."
 	)
 
+	# Two tones butted together at identical amplitude: the pitch changes and
+	# nothing else does. This once asserted two onsets, on the reasoning that a
+	# different note must be a new note. A real guitar disproved it. With no
+	# attack to corroborate it, a changed reading is the estimator moving rather
+	# than the player — and it moves constantly, because a string sheds energy
+	# from its fundamental fastest and its second harmonic eventually wins. That
+	# produced a steady drip of phantom notes an octave up, on notes still loud
+	# enough to pass any noise gate.
+	#
+	# Only a microphone reaches this code; keyboard and MIDI notes arrive
+	# already separated through their own sources. So there is no synthesiser
+	# sliding between pitches at constant volume to serve, and the rule can be
+	# the physical one. See `playing_techniques_test.gd`, which pins both sides:
+	# `_octave_drift()` for the phantom and `_hammer_on()` for the quietest real
+	# note that must still count.
 	var changed := _joined(
 		_wave("saw", a3, 44100.0, 11025, 0.0),
 		_wave("saw", d4, 44100.0, 11025, 0.0)
@@ -468,17 +485,15 @@ func _test_onsets() -> void:
 		if entry.is_onset:
 			onset_notes.append(entry.midi_note)
 	_expect(
-		onset_notes.size() == 2,
-		"Changing note must fire a second onset, not %d in total."
-		% onset_notes.size()
+		onset_notes.size() == 1,
+		"A pitch change with no attack behind it is the estimator moving, not a "
+		+ "new note, so this must be 1 onset, not %d." % onset_notes.size()
 	)
-	if onset_notes.size() == 2:
+	if onset_notes.size() >= 1:
 		_expect(
-			onset_notes[0] == 57 and onset_notes[1] == 62,
-			"The two onsets must report A3 then D4, not %s then %s." % [
-				PitchDetector.note_label(onset_notes[0]),
-				PitchDetector.note_label(onset_notes[1]),
-			]
+			onset_notes[0] == 57,
+			"The onset must report A3, not %s."
+			% PitchDetector.note_label(onset_notes[0])
 		)
 
 	var replayed := _joined(
@@ -512,9 +527,23 @@ func _test_onsets() -> void:
 
 
 # --------------------------------------------------------------------------
-# Robustness
+# Playing techniques
 # --------------------------------------------------------------------------
 
+
+## What the detector does with the things a player actually does, as opposed to
+## the isolated attacks the rest of this file synthesises.
+##
+## Every case here is a regression. The onset rule was originally tuned against
+## single plucks separated by silence, which is the one thing a rhythm game
+## player never does, and it showed: a re-struck string went unheard four times
+## in six, and a note change fired twice — once labelled with the note that was
+## still ringing. The tuner hid all of it, because a tuner draws every voiced
+## hop and a game only reacts to onsets.
+##
+## The false-positive case is the load-bearing one. Catching a re-pluck is easy
+## if invented notes are free; it is only interesting alongside a held note that
+## must produce exactly one.
 
 func _test_robustness() -> void:
 	var detector := PitchDetector.new()

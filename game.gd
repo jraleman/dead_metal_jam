@@ -44,7 +44,16 @@ static func manifest() -> GameManifest:
 		"instructions_demo_prompt": "PLAY THE NOTE SHOWN ON SCREEN",
 		"instructions_solo_summary": (
 			"A note appears; play it on your instrument and the microphone does "
-			+ "the rest. Any octave counts, so play it where it sits best."
+			+ "the rest. Any octave counts, so play it where it sits best. No "
+			+ "instrument handy? A MIDI keyboard or the computer keyboard works."
+		),
+		# Overrides the framework's mouse-and-keyboard line, which would be
+		# nonsense here: nothing in this game is played with a control the base
+		# knows about.
+		"instructions_player_one_controls": (
+			"Your instrument, into your microphone\n"
+			+ "Or a MIDI keyboard, or A S D F G H J to practise\n"
+			+ "F2: microphone self-test"
 		),
 	}
 	game.stats_url = "https://deskcansaw.com/stats/dmj"

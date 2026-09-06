@@ -31,6 +31,7 @@ var _last_note := -1
 var _last_cents := 0.0
 var _onset_flash := 0.0
 var _onset_count := 0
+var _log: OnsetLog
 
 @onready var _note: Label = %Note
 @onready var _octave: Label = %Octave
@@ -63,9 +64,35 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--selftest"):
 		_toggle_test_tone()
 
+	# `-- --log` dumps every hop to CSV so the onset thresholds can be set from
+	# a real decay envelope rather than a synthesised one (DESIGN.md §13).
+	if OS.get_cmdline_user_args().has("--log"):
+		_start_log()
+
+
+## Opens the onset log and says so on screen. Failure is reported and then
+## ignored: the tuner's job is to tune, and it can still do that.
+func _start_log() -> void:
+	_log = OnsetLog.new()
+	if _log.start(AudioServer.get_mix_rate()):
+		print("Onset log: ", _log.absolute_path())
+		_status.text = "Recording onset log to %s" % _log.absolute_path()
+	else:
+		_log = null
+		_status.text = "Onset log could not be opened — tuning anyway."
+
+
+func _exit_tree() -> void:
+	if _log == null:
+		return
+	_log.close()
+	print("Onset log: %d hops written to %s" % [_log.rows(), _log.absolute_path()])
+
 
 func _process(delta: float) -> void:
 	for analysis: PitchAnalysis in _detector.push_frames(_mic.poll()):
+		if _log != null:
+			_log.record(analysis)
 		_consume(analysis)
 
 	if _mic.is_calibrating():

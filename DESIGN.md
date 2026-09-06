@@ -106,6 +106,13 @@ mode the same loop runs with no pool — a bot that fires costs points and combo
 and the run simply ends with the chart. Neither shape is game-specific: both
 come from the base (§7).
 
+> **Implementation note.** The shell reads `round_duration` when it resets the
+> round, and `_load_round_settings()` runs before that, so the track is built
+> there and sets the duration from its own length. The figure is a worst case —
+> it assumes nothing is ever killed — which makes the timer a backstop and
+> `TRACK CLEARED` the normal way a round ends. Leaving the base 30 s default in
+> place would have silently truncated every track longer than it.
+
 ---
 
 ## 3. Modes
@@ -176,7 +183,6 @@ var timestamp_us: int   # Time.get_ticks_usec() at detection, pre-offset
 ```
 
 `NoteRouter` owns the only public gameplay surface:
-
 ```gdscript
 signal note_started(event: NoteEvent)
 signal note_ended(midi_note: int)
@@ -195,6 +201,33 @@ later therefore means adding or dropping a source behind the router — never
 touching gameplay, scoring, the chart or the HUD. A source that cannot run on
 the current platform simply is not constructed, which is the same code path as
 "no device plugged in", and that path is already the tested one.
+
+**What ships today.** All of it: `note_event.gd`, `note_source.gd`, all three
+sources and `note_router.gd`. `gameplay.gd` now talks only to the router and
+cannot tell a guitar from a MIDI keyboard from the `A` key. Four decisions came
+out of building it:
+
+- **A source that fails stays attached.** It reports `is_available() == false`
+  with a reason instead of being dropped, so a dead microphone can say *why* on
+  screen. Losing the microphone no longer stalls a round either: the other
+  sources are attached independently, so play continues on whatever still works
+  and the message says so.
+- **Latency compensation belongs to the source, not the router.** Each source
+  reports its own `latency_ms()` and the router subtracts it. The measured
+  round trip in `DmjProfile` (§4.6) is a fact about the *microphone* path;
+  applying it to MIDI — which is quantised to the frame and nothing else —
+  would push those notes early by the width of the window they are being judged
+  against.
+- **Duplicates are merged across sources, never within one.** A guitar heard by
+  a pickup and a microphone at once is one note, so the second report of the
+  same pitch class within 150 ms is dropped. Two notes from *the same* source
+  are always two notes: re-striking a string is exactly what the game is
+  listening for, and each source already has its own repeat guard.
+- **The router has a gate.** `set_accepting(false)` drops everything, which is
+  how the soundcheck, the gaps between rounds and the results screen ignore
+  playing without every source having to learn what a round is. Before this,
+  only the microphone was quiet during the soundcheck — a MIDI note would have
+  scored during a countdown the player could not see.
 
 ### 4.2 MIDI path (primary)
 
@@ -224,9 +257,13 @@ Notes and caveats:
 
 - `OS.open_midi_inputs()` opens **every** connected device at once; there is no
   per-device open. Filter in `MidiNoteSource` using `InputEvent.device` against
-  the index chosen in Soundcheck. Verify the `device` field is populated on
-  4.7 during the first spike — if it is not, the Soundcheck device picker
-  degrades to "all devices" and stays a no-op.
+  the index chosen in Soundcheck. **Verified on Windows with Godot 4.7.2**: an
+  Akai MPK mini Play mk3 reported `device = 0`, matching its index in
+  `OS.get_connected_midi_inputs()`, so the field *is* populated and a per-device
+  picker is possible. `MidiNoteSource.observed_devices()` records every id seen
+  — including ids filtered out — so the same check can be repeated on a platform
+  that has not been tried yet. If it ever comes back empty after real playing,
+  the picker degrades to "all devices" and stays a no-op.
 - Call `OS.close_midi_inputs()` on `_exit_tree()`. Leaving ports open across
   scene changes has caused stuck handles on some ALSA setups.
 - MIDI arrives through the normal input pipeline, so it is quantised to the
@@ -234,7 +271,8 @@ Notes and caveats:
   well inside the "Perfect" window defined in §6.
 - Velocity is real data on this path and feeds scoring flavour (a loud kill
   gets a bigger hit reaction). It is *never* a gate — a quiet correct note is
-  still a correct note.
+  still a correct note. **Confirmed live**: an MPK mini produced velocities
+  across 0.06–0.53 in ordinary playing, so the range is worth reacting to.
 - Sustain pedal (`MIDI_MESSAGE_CONTROL_CHANGE`, controller 64) is ignored in
   MVP. Ignoring it explicitly is important: without that, a held pedal makes
   every note look sustained to the Amp Golem check.
@@ -375,12 +413,64 @@ which is exactly the "tell a C from an E" requirement.
 8. **Stabilise:** median-of-3 across hops. There is deliberately **no separate
    octave-correction pass** — see the measured result below.
 9. **Onset:** emit `note_started` when the same note has been stable for two
-   hops, a refractory period (~60 ms) has elapsed, *and* either the note
-   **changed** or the hop's RMS exceeds its trailing average by the onset
-   ratio. A change of pitch needs no loudness test — something was played by
-   definition. The loudness test exists solely for re-articulation of the note
-   already sounding, which pitch alone cannot see: a repeated note is a
-   repeated shot.
+   hops, a refractory period (~60 ms) has elapsed, *and* an **attack** is live
+   and settled. A changed pitch is **not** on its own sufficient — see the fifth
+   fault below, which is the one that cost the most.
+
+**The onset rule was rebuilt after the first real-instrument session, and it is
+the part of this pipeline that has been wrong most often.** Everything above it
+was validated against synthesised tones in Milestone 1 and has not needed to
+change since. The onset rule was validated the same way and that turned out to
+mean almost nothing, because the corpus was *isolated plucks separated by
+silence* — the one thing a player never does. Against actual playing it lost
+four re-strikes in six and fired twice on a single note change. Six separate
+faults, each worth recording because each is a trap the next person will fall
+into:
+
+| Fault | Why it happened | Fix |
+| --- | --- | --- |
+| A re-plucked string went unheard | The threshold was set for a note starting from silence (1.8x). A string struck again while ringing *adds* to what is there; the real step is 1.15x–1.6x. | Threshold lowered, with hysteresis to make it safe. |
+| The trailing average ate the attack | It is the reference an attack is measured against, and it followed the signal at 0.25 — so it absorbed a quarter of the transient in one hop and the ratio never cleared. | The average is **frozen** for the first few hops of an attack. |
+| Loudness was tested at the wrong moment | The transient peaks in about a hop; the decision waited two hops for the pitch to settle, by which time the evidence was gone. | The attack is **latched** when it happens and spent when the note becomes nameable. |
+| One pluck read as two notes, the first mislabelled | An analysis window is ~46 ms, about twice a hop, so for a hop or two after any attack the window still holds the *previous* note — and the detector fired on it before the new pitch resolved. | An attack is unusable until the window-straddle has passed (`ONSET_ATTACK_SETTLE_HOPS`). |
+| **A changed pitch counted as a new note on its own** | "Different note, so it must be new" is false for a microphone. A real string sheds energy from its fundamental fastest, so partway through a long note the second harmonic is the loudest thing left and the estimator starts naming *that* — a phantom an octave up, on a note still loud enough to pass any noise gate. Room tone drifts the reading a semitone and does the same. | **An onset now always requires an attack.** Only a microphone reaches this code — keyboard and MIDI notes arrive already separated through their own sources — so the rule can be the physical one: you cannot start a note on a string without putting energy in. |
+| The trailing average went deaf after every onset | It is frozen through an attack, so at the moment an onset fires it still describes the *silence before* the note. Left to converge it spends ~5 hops climbing, and every one of those reads high enough to look like an ongoing attack — which holds the hysteresis disarmed. A fast run lost its second note this way. | On an onset, snap the average to the accepted note. Once a note is accepted it *is* the background the next attack must beat. |
+
+The attack test itself is two comparisons, because neither alone is enough. A
+note from near-silence is obvious against the **trailing average**. A note
+re-struck mid-ring barely moves the average at all, but stands clearly above the
+**recent trough** — the quietest hop just before it. The trough is a rolling
+minimum rather than the previous hop precisely because a transient straddles two
+hops: measured on a tremolo at 0.18 s, hop-to-hop comparison peaked at 1.10
+while the same attack stood 1.26 above its trough.
+
+Both comparisons are **ratios**, and a ratio is scale-free — which is why a
+third test is needed. Noise drifting from 0.02 to 0.03 is the same 1.5x step as
+a note starting from nothing, so proportion alone fires continuously on room
+tone. The voiced check is not enough either: it compares against a floor
+measured during a *quiet* calibration, while a room in use also contains
+handling, pick scrape and the tails of notes already struck. So a hop must also
+stand clear of the measured floor by `ONSET_NOISE_MARGIN` before it may be an
+attack at all. Proportion says *something changed*; the margin says *there is a
+note here to change*.
+
+**A legato exception was written, measured and removed.** Hammer-ons start a
+note without a fresh strike, so allowing a changed pitch through on the weaker
+test of "the level has not sagged" looked necessary. It was not, and it was
+actively harmful: a level that has merely held is also what a string sheds into
+as its fundamental dies, so the exception readmitted the exact phantoms it was
+written beside. A finger landing on a fret is a *quiet attack, not an absent
+one*, and the trough test already hears it — measured, from about 1.4x the level
+still ringing. A limp hammer-on does not register, which is also true of a real
+guitar.
+
+All thresholds were **swept against the whole scenario set, not picked**. The
+noise margin is a worked example: at 1.0 and 1.5 a decaying string's tail still
+put a phantom semitone neighbour into a six-note phrase, and at 3.0 a genuine
+fingerpicked note was swallowed. 2.0 and 2.5 both pass, so the shipping value
+sits between them rather than on either edge — the corpus is synthesised, and a
+value that only just passes it would be tuned to the model rather than to the
+instrument.
 
 **Measured, not assumed.** The detector and its corpus were built first
 (Milestone 1) and the numbers below come from running it, not from estimating:
@@ -393,6 +483,53 @@ which is exactly the "tell a C from an E" requirement.
 | Confidence on clean input | ≥0.94 |
 | Confidence on white noise | 0.0 — noise is never reported as a note |
 | Cost | **2.2 ms per window** against a 23.2 ms hop budget — 10%, measured in Godot 4.7.2 |
+
+**Playing techniques** are now measured too, and are permanent regression tests
+in their own suite (`tests/playing_techniques_test.gd`, split from the detector
+tests once it outgrew them). Every row was a failure before the onset rebuild:
+
+| Technique | Expected | Result |
+| --- | --- | --- |
+| Six different notes, silence between | 6 onsets, correct notes | ✅ (was 11, alternating mislabels) |
+| Same string re-struck every 0.5 s while ringing | 6 | ✅ (was 2) |
+| Same string re-struck every 0.25 s | 6 | ✅ (was 1) |
+| Tremolo picking at 0.18 s | 6 | ✅ (was 1) |
+| Fast melodic line, damped, 0.15 s apart | 6, correct notes | ✅ |
+| Fingerpicking at ~1/9 strum level | 6 | ✅ |
+| Hammer-on onto a ringing string | 2 | ✅ — sets the quiet limit, ~1.4x the ringing level |
+| **One note held for 4 s** | **exactly 1** | ✅ |
+| **Fundamental dying before its 2nd harmonic** | **exactly 1** | ✅ (was 2 — the phantom octave) |
+| Three notes left overlapping | — | 1: monophonic by design, see below |
+
+Every one of those is then run **again over room tone**, which is the harder
+half and the half that was missing entirely:
+
+| In a room | Expected | Result |
+| --- | --- | --- |
+| Room tone, nothing played | **0 onsets** | ✅ |
+| Six notes over room tone | 6, correct notes | ✅ |
+| Re-strikes at 0.25 s over room tone | 6 | ✅ |
+| A note decaying into room tone | **exactly 1** | ✅ |
+| Fingerpicking over room tone | 6 | ✅ — the tightest case in the suite |
+
+Crucially the room is **noisier than the calibration**, because that is how
+playing works: you calibrate once, in a quiet moment, before picking the
+instrument up. A suite that calibrates and plays at the same noise level is
+testing a room nobody plays in, and the gap between those two numbers is exactly
+where phantom notes live.
+
+The held-note and octave-drift rows are the load-bearing ones. Catching a
+re-strike is trivial if invented notes are free; it is only meaningful next to a
+sustained note that must produce exactly one onset, and a decaying string's own
+beating is within a few percent of a genuine tremolo attack. Those pairs are what
+pin the thresholds — and the suite was verified to *fail* against the previous
+detector before being trusted.
+
+The detector is **monophonic** and stays that way for the jam. Three notes left
+ringing together resolve to one, which is a property of the algorithm rather
+than a bug in the tuning: MPM estimates *a* period, and a chord has several.
+Charts are written as single notes, so this is a limit the game never reaches —
+but it is measured rather than assumed, so it cannot quietly become a surprise.
 
 Accuracy falls off with pitch because C6 is only ~10.5 samples per period once
 decimated. That is well inside the ±50 cents a semitone allows, so it does not
@@ -425,6 +562,19 @@ black-key row above). It exists for three real reasons, not as a convenience:
 
 It is not hidden. It is a listed input option, marked "practice".
 
+**What ships today.** `KeyboardNoteSource`, with the layout every tracker and
+DAW already uses — `A S D F G H J K` for the white keys under `W E T Y U` for
+the black ones, `Z` and `X` to shift the octave. Two notes on it:
+
+- **The self-test tone moved from `T` to `F2`.** `T` is F♯ once a piano is on
+  the keyboard, and a diagnostic that silently steals a note is worse than a
+  diagnostic on a duller key. Every letter in both home rows is now a note, so
+  anything the game binds has to live on a function key.
+- **Held keys are released before an octave shift.** Otherwise a note started
+  before the shift would be ended with the number it *would* have had after it,
+  and the note would never stop. The test asserts the note ends with the number
+  it started with.
+
 A phone has no keyboard, so mobile gets the same idea in a different shape: a
 **touch onset source** — tap anywhere on the playfield to fire an onset-only
 `NoteEvent`, which is exactly what Rhythm mode already consumes. It is a fourth
@@ -445,9 +595,11 @@ jam (§4.7).
 Two consequences, both designed for rather than papered over:
 
 - **A calibration step in Soundcheck.** The metronome ticks; the player plays
-  along for eight beats; the mean signed offset is stored as
-  `input_latency_ms` and subtracted from every subsequent `timestamp_us`. This
-  is what makes the mic path competitive with MIDI on timing.
+  along for eight scored beats (twelve, less a two-beat count-in and a tail);
+  the median signed offset is stored as `input_latency_ms` and subtracted from
+  every subsequent `timestamp_us`. This is what makes the mic path competitive
+  with MIDI on timing. Built — see "What ships today" below for why the figure
+  is a median and where it is persisted.
 - **Timing windows are generous by genre standards** (§6). A rail shooter is
   not a rhythm game with 20 ms judgements, and the mic path could not honour
   those windows anyway.
@@ -472,6 +624,42 @@ two that drift. Two decisions came out of building it:
   has been measured. Deferring the round start itself was tried first and
   broke the shared contract in `game_shell_test.gd`, which requires
   `_begin_first_round()` to actually begin one.
+- **The latency screen is built** — `ui/calibration.tscn`, backed by
+  `input/latency_calibration.gd`, `input/metronome_click.gd` and
+  `dmj_profile.gd`. Four decisions came out of building it, three of which
+  contradict what the rest of this section originally said:
+
+  - **The click is broadband noise, not a tone.** A tonal click is a note, and
+    the analyser cannot tell the game's own metronome from the player. Even a
+    3 kHz sine has NSDF peaks at short lags inside the search range. Noise has
+    no period, so it reads as unvoiced and is invisible to the detector;
+    `latency_calibration_test.gd` asserts the metronome fires **zero** onsets
+    while a G3 played over it still fires exactly one.
+  - **Notes are dated on the audio clock, not the frame clock.** A drained
+    block is up to a frame long, so stamping every sample in it with "now"
+    smears a note across tens of milliseconds — against a ±60 ms window that
+    is most of the budget. `PitchAnalysis.sample_index` counts samples on the
+    stream itself, and wall time is recovered by counting backwards from the
+    newest sample: `wall(S) = now - (pushed - S) / rate`.
+  - **The stored figure is the median, not the mean.** Eight scored beats is a
+    small sample and one fumbled note drags a mean straight past the tolerance
+    the exercise exists to establish. Spread is reported as the mean absolute
+    deviation about that median, and a run whose spread exceeds 45 ms is
+    rejected rather than stored — an inconsistent player has measured nothing.
+  - **The detector's own delay is a measured constant, not a formula.** A
+    window turns voiced once the note fills roughly a third of it, not half and
+    not all, so anything derived from `WINDOW_SIZE` overstates it by 15 ms and
+    up. `TYPICAL_ONSET_DELAY_SECONDS = 0.042` is what the analyser was actually
+    observed to do (34.6–49.6 ms at 48 kHz), and a test fails if reality drifts
+    more than one hop from it. **Constancy matters more than the value**: a
+    fixed delay is subtracted once and disappears, while a wandering one puts a
+    floor under accuracy that no calibration can lift. Measured jitter is
+    14.9 ms, inside a single 21.3 ms hop.
+
+  The screen has been verified end to end against an injected offset — an
+  80 ms simulated delay was measured as 81.9 ms — but **not yet against a real
+  microphone**, so the 80–90 ms row in the table above is still an estimate
+  rather than an observation.
 
 ### 4.7 Platform ladder
 
@@ -621,6 +809,23 @@ rather than adding a new one keeps one honest "make it easier" dial.
 - **Wrong note** — −25 and combo reset. Never reports a mistake to the shell,
   so it never costs a life in any round mode (§7.3).
 
+#### Which of those two a note gets — decided in the build
+
+The two penalties above look like one rule until you implement them, because a
+played note can miss in three different ways, and only one of them deserves the
+score hit:
+
+| Situation | Judgement | Why |
+| --- | --- | --- |
+| No drone is on screen at all | **Noise** — combo only | Between waves. Warming up, tuning and noodling have to be free, or the game punishes practising. |
+| Drones are up, the pitch matches none of them | **Wrong note** — −25, combo reset | The player aimed and picked the wrong target. This is the mistake the penalty exists for. |
+| Drones are up, the pitch matches one, but it is not inside a timing window yet | **Noise** — combo only | The player identified the right target and was merely early. Charging points for that teaches hesitation, which is the opposite of what a rhythm game wants. |
+
+The third row is the non-obvious one and it is deliberate. Being early on the
+correct note is a *timing* error, and timing errors are already paid for by the
+tier ladder — charging twice makes the game feel like it is looking for reasons
+to say no.
+
 ### Stats fed to the framework
 
 `_round_totals()` and `_player_stats(0)` are overridden to report hits, misses,
@@ -739,7 +944,7 @@ minutes.
 
 | Enemy | Demand | Teaches | MVP |
 | --- | --- | --- | --- |
-| **Rust Drone** | One note, one hit. | The core verb. | Yes |
+| **Rust Drone** | One note, one hit. | The core verb. | ✅ Built |
 | **Feedback Wasp** | One note, very short window, fast approach. | Reaction speed; punishes hesitation. | Yes |
 | **Plated Hulk** | A 2–3 note sequence, in order, one plate per note. | Phrasing; reading ahead. | Yes |
 | **Amp Golem** | Hold the note for N beats — released early, it re-armours. | Sustain and breath/bow control. Uses `note_ended`. | Yes |
@@ -762,7 +967,25 @@ minutes.
 - Multi-note enemies (Hulk) hold an internal cursor and reset it on a wrong
   note in the sequence.
 
-### 8.4 Wave authoring
+**As built:** front-most and in-window are two separate decisions, made in that
+order. The live drones are sorted by approach progress, and the first one in
+that order that both matches the pitch *and* is inside a timing window is the
+one that dies — **front-most decides *which*, the window decides *whether*.**
+Collapsing those into one filter looks equivalent and is not: it would let a
+note skip past a matching front drone that was fractionally early and kill the
+one behind it, which reads on screen as the shot going through the target.
+
+### 8.4 Art
+
+The MVP ships **flat placeholder rectangles** with the required note letter
+drawn on them — body, lane tint, a wind-up bar and a target outline, nothing
+more. This is on purpose for the jam: the rules above are the risky part, and
+they are legible without art. Depth is faked with position, `scale` and
+`z_index`, and the walk toward the camera is **linear** rather than eased, so
+the arrival beat is predictable enough to play to. Everything an artist would
+replace is confined to `RustDrone._draw()`.
+
+### 8.5 Wave authoring
 
 Waves come from the chart (§10). A section names its wave archetype and the
 generator places bots on lanes at chart beats. Handwritten per-bot placement is
@@ -787,27 +1010,36 @@ godot-base/games/dead_metal_jam/
   gameplay.gd                  # ✅ extends GameShell
   input/
     note_event.gd              # class_name NoteEvent
-    note_source.gd             # class_name NoteSource (abstract base)
-    midi_note_source.gd
+    note_source.gd             # ✅ class_name NoteSource (abstract base)
+    note_event.gd              # ✅ class_name NoteEvent — the only thing gameplay sees
+    midi_note_source.gd        # ✅ class_name MidiNoteSource
     mic_capture.gd             # ✅ class_name MicCapture — bus, device, calibration, self-test
-    mic_note_source.gd
-    keyboard_note_source.gd
+    mic_note_source.gd         # ✅ class_name MicNoteSource — MicCapture + PitchDetector
+    keyboard_note_source.gd    # ✅ class_name KeyboardNoteSource
     touch_note_source.gd       # post-jam, mobile (see 4.5 / 4.7)
     web_midi_bridge.gd         # post-jam, web only (see 4.2 / 4.7)
     pitch_detector.gd          # ✅ class_name PitchDetector — pure DSP, no autoloads
     pitch_analysis.gd          # ✅ class_name PitchAnalysis — one hop's result
-    note_router.gd             # class_name NoteRouter
+    latency_calibration.gd     # ✅ class_name LatencyCalibration — pure math, no nodes
+    metronome_click.gd         # ✅ class_name MetronomeClick — pre-rendered noise clicks
+    onset_log.gd               # ✅ class_name OnsetLog — opt-in CSV, retunes the onset rule
+    note_router.gd             # ✅ class_name NoteRouter — merge, dedupe, latency
   chart/
     jam_chart.gd               # class_name JamChart extends Resource
     jam_section.gd
     jam_beat.gd
     charts/track_01.tres
-  actors/
-    rail_stage.gd              # rail advance + stage marks
-    enemy_bot.gd  + .tscn
-    note_glyph.gd
+  encounter/
+    encounter_director.gd      # ✅ class_name EncounterDirector — lanes, waves, matching, tiers
+    track_builder.gd           # ✅ class_name DmjTrackBuilder — practice waves; the chart's seam
+  enemies/
+    rust_drone.gd              # ✅ class_name RustDrone — approach, wind-up, fire
+    feedback_wasp.gd           # see 8.2
+    plated_hulk.gd
   ui/
     tuner.tscn + .gd           # ✅ standalone soundcheck / tuner, runnable on its own
+    calibration.tscn + .gd     # ✅ standalone latency calibration, runnable on its own
+    input_check.tscn + .gd     # ✅ standalone: every source at once, what the router emits
     note_readout.tscn + .gd
     soundcheck.tscn + .gd
     share_art.tscn + .gd       # game-owned share card art
@@ -815,25 +1047,67 @@ godot-base/games/dead_metal_jam/
     audio/                     # track audio and game SFX referenced by game.cfg
     images/
   tests/
-    pitch_detector_test.gd     # ✅
-    note_router_test.gd
+    pitch_detector_test.gd     # ✅ DSP: which note is this window?
+    playing_techniques_test.gd # ✅ the onset rule against real playing, in a real room
+    latency_calibration_test.gd  # ✅ hardware-free: matching, timestamps, click silence
+    note_router_test.gd        # ✅ hardware-free: dedupe, offset, keyboard layout, MIDI
+    encounter_test.gd          # ✅ the rules: matching, tiers, wind-up, waves, track end
     jam_chart_test.gd
 ```
+
+**Why `encounter/` is not in `gameplay.gd`.** `gameplay.gd` extends
+[`GameShell`], which uses autoload instances, so a headless `--script` test can
+never name it (§9.8). Every rule that needs testing therefore lives in
+`encounter/` and `enemies/`, which touch no autoload at all — `gameplay.gd` is
+left holding only the wiring between the shell, the router and the director.
+That is why `encounter_test.gd` can drive the real rules rather than a copy.
 
 ✅ marks what exists today. `gameplay.gd` / `gameplay.tscn` follow
 `target_rush`; the folder name matches the manifest id, as in the other two
 games, so nothing has to reconcile the two. The id is also a `project.godot`
 key (`share/stats_urls/<id>`), which is the reason it stays snake_case.
+`dmj_profile.gd` sits beside `game.gd` at the folder root: it is the game's own
+`user://` file, not part of the input stack.
 
-**Trying it without the menu.** The tuner scene runs on its own, which is the
-fastest way to check a microphone or a new instrument:
+**Trying it without the menu.** The tuner and calibration scenes run on their
+own, which is the fastest way to check a microphone or a new instrument:
 
 ```
 godot --path godot-base res://games/dead_metal_jam/ui/tuner.tscn
 godot --path godot-base res://games/dead_metal_jam/ui/tuner.tscn -- --selftest
+godot --path godot-base res://games/dead_metal_jam/ui/calibration.tscn
+godot --path godot-base res://games/dead_metal_jam/ui/calibration.tscn -- --selftest
+godot --path godot-base res://games/dead_metal_jam/ui/input_check.tscn
 ```
 
-`T` toggles the self-test tone in either scene, `Esc` leaves.
+`F2` toggles the microphone self-test tone in any of them, `Esc` leaves.
+`--selftest` on
+the calibration scene plays synthetic plucks in place of a player, so the
+screen can be exercised on a machine with no microphone — which is the machine
+it was written on.
+
+**Checking the gear before a set.** `input_check.tscn` attaches every source to
+a real `NoteRouter` and shows what comes out: which sources are listening, the
+last note and where it came from, the MIDI device ids actually observed, and
+how many duplicates the router merged. It prints each routed note to stdout as
+well, so a session can be captured to a file and read back — which is how the
+`InputEvent.device` question in §4.2 was finally answered.
+
+**Capturing a real decay envelope.** `-- --log` on the tuner writes one CSV row
+per hop to `user://dmj_onset_log.csv` (the absolute path is printed on start
+and on quit):
+
+```
+godot --path godot-base res://games/dead_metal_jam/ui/tuner.tscn -- --log
+```
+
+Each row carries `rms`, the `trailing_rms` it was compared against, their
+ratio, and the stable-hop count — the two quantities [constant
+`ONSET_RMS_RATIO`] and [constant `ONSET_STABLE_HOPS`] actually gate on, next to
+what the detector concluded. Play, quit, plot. This is what closes the standing
+"tuned on synthetic attacks" risk in §13, and it is deliberately off by default
+and absent from the round scene: a game should not be writing 43 rows a second
+while somebody is playing it.
 
 ### 9.2 Manifest
 
@@ -885,18 +1159,27 @@ and `_configure_game_tunables()` maps them to manifest keys — so a new game's
 tunables need new rows. That is a real framework edit, and the way to keep it
 small is to keep the tunable list small.
 
-**Two tunables go to Settings → Game** (the things a player changes between
+**One tunable goes to Settings → Game** (the thing a player changes between
 sessions and expects to persist):
 
 | Key | Range | Default |
 | --- | --- | --- |
 | `game/jam_hit_window` | 0.5 – 2.0 | 1.0 |
-| `game/jam_input_latency_ms` | 0 – 250 | 0 (set by calibration) |
+
+**Latency is not a settings row, and that is a deliberate reversal.** An
+earlier draft listed `game/jam_input_latency_ms` here. It has shipped instead
+in `dmj_profile.gd`, which writes `user://dead_metal_jam.cfg`. Latency is a
+property of one machine's sound card and one player's instrument, not a
+preference: it is measured rather than chosen, a wrong value is a bug rather
+than a taste, and it must not travel with a settings profile that gets copied
+to another computer. Putting it in a menu invites players to "tune" a number
+they cannot perceive directly. Keeping it in a game-owned file also means the
+framework's settings menu needs one new row for this game instead of two.
 
 There is **no `game/jam_lives` tunable.** The earlier draft specified one; the
 base now ships `game/starting_lives` (1–9) beside *Round mode*, shared by every
 game, so a per-game duplicate would be a second dial for the same number. That
-also drops this game's settings-menu footprint from three rows to two.
+also drops this game's settings-menu footprint from three rows to one.
 
 **Everything else lives in Soundcheck** — input source, MIDI device, audio
 input device, noise floor, strict-octave toggle, mode. These are per-session
@@ -931,7 +1214,8 @@ the third settings row that came with it.
 | 10 | `default_bus_layout.tres` | **Avoided** — the Instrument bus is created at runtime (§4.3). |
 | 11 | Web MIDI shim, touch onset source | **Avoided as a framework change** — both are `NoteSource` files inside `games/dead_metal_jam/input/` (§4.7). Reaching a new platform costs the base nothing. |
 | 12 | `instructions_video_test.gd` — allow a game with no walkthrough clip | **Done.** The screen already supports this (`_setup_video()` hides the card and falls back to the single-column layout); only the test insisted every catalogued game ship footage, which made "add a game" mean "record a video first". The assertion now follows the code: declare a clip and it must be your own clip and poster, declare none and the card must give way to the text. Coverage went up, not down — two games must still ship clips. |
-| 13 | `router.gd`, `game_shell.tscn`, `menu_screen.gd`, theme | **Untouched.** |
+| 13 | `instructions.gd` — an `instructions_player_one_controls` copy key | **Done.** The solo control card hardcoded `"Mouse or arrow keys"`, so this game's instructions screen described controls it does not have. The key is optional and the old string is still the fallback, so the other two games render identically. A game that supplies its own line also suppresses the auto-appended controller line: the framework cannot know whether a pad does anything in a game it knows nothing about, and offering a gamepad to someone holding a guitar is worse than saying nothing. |
+| 14 | `router.gd`, `game_shell.tscn`, `menu_screen.gd`, theme | **Untouched.** |
 
 ### 9.6 Achievements
 
@@ -993,8 +1277,26 @@ framework change.
   noise floor and silence gates, onset counting, and it prints the measured
   cost per window so a regression in speed is visible even though speed is not
   asserted.
+- `tests/playing_techniques_test.gd` — the onset rule against playing rather
+  than tones: re-strikes on a ringing string, tremolo, damped runs,
+  fingerpicking, hammer-ons, a note held for four seconds, and a string whose
+  fundamental dies before its second harmonic. Then every one of them again
+  over room tone that is **louder than the calibration**, which is the case
+  that matters and the one a silent corpus cannot express. Split out of
+  `pitch_detector_test.gd` because they answer different questions — that one
+  asks "which note is this window?", this one asks "did a note just start?" —
+  and because the two together exceeded the 1000-line lint limit.
 - `tests/note_router_test.gd` — source merging, dedupe, latency offset,
   and the zero-source case.
+- `tests/encounter_test.gd` — the game's rules, with no scene and no autoload:
+  timing tiers and their widening under the accessibility handicap, the combo
+  ladder, front-most matching, the noise / wrong-note split, wind-up to fire,
+  clean versus dirty waves, track end, Rhythm mode's flag, and the practice
+  track builder. Drones are stepped by hand at a fixed 1/60 timestep, so every
+  timing assertion is deterministic rather than frame-rate dependent.
+  **Verified to have teeth** by mutation: bypassing the timing window, sorting
+  targets back-most first, and suppressing the fire transition each fail it
+  loudly (3, 2 and 3 checks respectively).
 - `tests/jam_chart_test.gd` — chart resources load, sections are ordered, beat
   times are monotonic.
 - Run `godot --headless --path . --import` after adding the `class_name`
@@ -1206,10 +1508,10 @@ porting something that is not yet fun is the classic way to lose a jam.
 | # | Milestone | Proves |
 | --- | --- | --- |
 | 1 | ✅ **Done.** `PitchDetector` + its unit test, standalone. Synthesised buffers in, MIDI numbers out, across E2–C6. | **The entire concept.** If this is not reliable, everything downstream is worthless. Do not proceed past it. **Result: 0 note errors, ≤7 cents, 2.2 ms against a 23.2 ms budget — go.** |
-| 2 | 🟡 **Mic source done.** `MicCapture` + the pitch readout in a standalone tuner scene (`ui/tuner.tscn`); play an instrument, watch the letter change. MIDI and keyboard sources, and the `NoteRouter` that fronts all three, are still outstanding. | The input stack end to end, and it is already a usable tuner. |
-| 3 | Noise-floor calibration ships as the soundcheck; **latency measurement on real hardware is still owed** — no instrument has met this build yet. | That the mic path can hit a ±60 ms window at all. |
-| 4 | 🟡 **Integration done, content not.** Folder, manifest, inherited shell scene and score wiring are live: the game is in the menu, calls a note, scores hits and misses, and the shared suite passes. Lanes and the Rust Drone are still outstanding. | The framework integration, and that `game_shell_test.gd` still passes. |
-| 5 | Damage: `_lose_life()` on a bot that fires, `_player_is_out()` gating, the wind-up telegraph, and `TRACK CLEARED` early end. Verified under **both** round modes. | The fail state — and that the game never branches on the round mode. |
+| 2 | ✅ **Done.** All three sources and the `NoteRouter` that fronts them; `gameplay.gd` consumes `NoteEvent` and cannot tell them apart. Verified against real hardware: an Akai MPK mini Play mk3 played correct notes with real velocity (0.06–0.53) and reported `device = 0`, and the computer-keyboard piano played every key. `note_router_test.gd` covers the rest headlessly in 66 checks. | The input stack end to end, and it is already a usable tuner. |
+| 3 | 🟡 **Built and self-verified, not yet met a microphone.** Noise-floor calibration ships as the soundcheck; `ui/calibration.tscn` measures the round trip against a noise metronome and stores the median in `user://dead_metal_jam.cfg`. An injected 80 ms offset was measured as 81.9 ms, and the analyser's own delay was measured at 34.6–49.6 ms with 14.9 ms of jitter — inside one hop. **What is still owed is one run with a real instrument.** | That the mic path can hit a ±60 ms window at all. |
+| 4 | ✅ **Done.** Three lanes, the Rust Drone, front-most matching, timing tiers, the combo ladder and the practice track builder. The round length now comes from the track (§2) rather than a hardcoded 30 s. Autoplayed headlessly through the real scene on the keyboard source: **4 waves, 14 of 14 drones killed, 0 misses, TRACK CLEARED, 3645 points** — which is exactly 14 kills at ×1/×2 combo with the exact-source bonus plus four clean-wave bonuses, so the scoring arithmetic is confirmed end to end and not just unit-tested. | The framework integration, and that `game_shell_test.gd` still passes. |
+| 5 | ✅ **Done.** Wind-up telegraph, `_lose_life()` on a drone that fires, `_player_is_out()` gating the router, and `TRACK CLEARED` via the inherited `_end_round()` (option 1 of §7.4). Verified in the real scene by a **pacifist run**: nobody plays, three drones fire, `lives` goes `3 → 0` and the round settles at 18.4 s against a 48 s timer. The win path and the loss path are therefore both exercised against the shipping scene. | The fail state — and that the game never branches on the round mode. |
 | 6 | Rail advance, sections, three lanes, the full MVP roster. | Pacing. |
 | 7 | Demo and Rhythm modes. | That the mode flags really are flags. |
 | 8 | Three charts, achievements, share art, tutorial capture. | **Jam submission.** |
@@ -1223,11 +1525,14 @@ porting something that is not yet fun is the classic way to lose a jam.
 | Risk | Mitigation |
 | --- | --- |
 | ~~GDScript NSDF is too slow at 43 hops/sec~~ | **Retired in milestone 1.** Measured in Godot at 2.2 ms per window against a 23.2 ms budget — ~10× headroom, before any of the planned fallbacks. The 1024-sample fallback and the worker thread are both still available if a phone disagrees. |
-| Mic latency makes the ±60 ms Perfect window unreachable | Calibration (§4.6); if real hardware says otherwise, widen the tiers — they are tuning constants, not architecture. |
+| Mic latency makes the ±60 ms Perfect window unreachable | **Calibration ships (§4.6) and measures correctly against an injected offset**, so the mechanism is no longer the risk — the remaining unknown is what a real sound card reports. The detector's own contribution is measured and, more importantly, *constant* (14.9 ms of jitter, inside one hop), so it subtracts cleanly. If real hardware says otherwise, widen the tiers — they are tuning constants, not architecture. |
 | Acoustic feedback (speakers → mic) triggers phantom notes | Capture bus is muted and never routed to Master (§4.3); Soundcheck measures the noise floor with the game's own music playing. |
-| `InputEvent.device` not populated for MIDI on 4.7 | Verified in milestone 2; degrades to all-devices. |
+| ~~`InputEvent.device` not populated for MIDI on 4.7~~ | **Retired in milestone 2.** Verified on Windows with Godot 4.7.2 and an Akai MPK mini Play mk3: `device = 0`, matching the index in `OS.get_connected_midi_inputs()`. A per-device picker is therefore possible. `MidiNoteSource.observed_devices()` keeps the check available on platforms that have not been tried, and the degrade-to-all-devices path is still there if one of them disagrees. |
 | Distorted electric guitar defeats the detector | Harmonic-rich waveforms and fundamentals down to 5% strength are in the milestone-1 corpus and pass, but synthesis is not a real amp — this only clears once milestone 2 runs a live signal through it. Rhythm mode is the honest fallback and ships in MVP for exactly this reason. |
-| **Onsets were tuned on synthetic attacks** | The onset rule (§4.4 step 9) is verified for behaviour — one note fires once, a re-pluck fires again, silence never fires — but its thresholds have never met a real decay envelope. Milestone 2's Soundcheck is where they get their real values, and they are constants for that reason. |
+| ~~**Onsets were tuned on synthetic attacks**~~ | **This risk fired, twice.** It was on the register from milestone 1, phrased as "the thresholds have never been measured against a real decay envelope", and it cost two rounds of real bugs. First: notes went unheard, because the corpus was isolated plucks separated by silence and nothing tested a string struck again while ringing. Second, immediately after: the corpus was still *silent*, so nothing tested a room — and a rule built only from ratios invented notes on room tone and on decaying strings. Six faults are recorded in §4.4. **What replaces it**: ten playing-technique scenarios, each run again over room tone that is deliberately louder than the calibration, all in `playing_techniques_test.gd`; thresholds swept rather than picked; and the suite verified to *fail* against the previous detector before being trusted. Residual: the corpus is still synthesised. `OnsetLog` (`-- --log` on the tuner, §9.1) captures the real thing, and one recorded guitar decay should be checked against these scenarios. |
+| **A silent test corpus is not a quiet one** | The second round of onset bugs existed because every scenario ran on digital zero. Silence is not a quiet room; it is a different problem, and an easier one. Both attack tests are ratios, and a ratio is scale-free, so noise drifting inside its own band clears any threshold a real note clears. The absolute floor is what separates them, and nothing on a silent background can measure whether it is set right. Any future signal-processing test must be run over noise, and over noise *louder than whatever was calibrated*, because that gap is where the failures live. |
+| **The tuner is not the game, and it hid a bug for weeks** | A tuner draws every *voiced hop*; gameplay reacts only to *onsets*. Those are wildly different bars, and the tuner passes the easier one — a real guitar looked perfect in `ui/tuner.tscn` the whole time the onset rule was losing two thirds of re-strikes. Anything verified only in the tuner is unverified for gameplay. `ui/input_check.tscn` exists for this reason: it shows what the router actually emits, which is what the game sees. |
+| **No export templates on the build machine** | Discovered deliberately early: `--export-release` fails with *no export template found* for 4.7.2, so **this project cannot currently produce a build at all**. It is a one-time ~1.4 GB download, not a code problem — but it is exactly the kind of thing that is fatal on deadline night and trivial a month before. Install and do one throwaway export before it matters. |
 | Players cannot read notation | The game never shows notation — letters only. Demo mode exists as the on-ramp, and Mirror Units teach by ear. |
 | **Jam deadline eats the game** | Milestone 1 is a hard gate and milestones 9–10 are outside the jam. If the schedule slips, the roster shrinks (§8.2 already marks three enemies stretch) and the chart count drops to one — the platform ladder is never the thing that gets rushed. |
 | **No native Web MIDI in Godot** | Known and confirmed, not a surprise to be discovered late (§4.2). Web still has the mic and keyboard paths, so a browser build is playable *before* the shim exists; the shim only restores the exact path. |
@@ -1241,6 +1546,11 @@ porting something that is not yet fun is the classic way to lose a jam.
 
 | Revision | Change |
 | --- | --- |
+| 11 | **It became a game** (§6, §8.3–8.5, §9.1, §9.8, §12 milestones 4 and 5). Milestones 4 and 5 are done: three lanes, the Rust Drone, front-most matching, timing tiers, the combo ladder, the wind-up telegraph, damage through `_lose_life()` and `TRACK CLEARED`. Four decisions are recorded. **Being early on the correct note is noise, not a wrong note** (§6) — the previous draft had two penalties and no rule for choosing between them, and the case that decides it is the player who identifies the right target and is fractionally ahead of the window; timing errors are already paid for by the tier ladder, and charging twice teaches hesitation. **Front-most and in-window are separate decisions in that order** (§8.3), because collapsing them lets a shot pass through a matching front drone that is fractionally early and kill the one behind it. **The round length comes from the track** (§2, as stated but not implemented) — a four-wave track runs 48 s against the shell's default 30 s timer, so `TRACK CLEARED` would almost never have fired; the track is now built in `_load_round_settings()`, which runs before the shell reads `round_duration`. And **the rules live outside `gameplay.gd`** (§9.1): `GameShell` uses autoload instances and so can never be named by a headless test, so `EncounterDirector`, `RustDrone` and `DmjTrackBuilder` touch no autoload and `encounter_test.gd` drives the shipping rules rather than a copy. Enemy art is deliberately **flat placeholder rectangles** (§8.4). One real bug is recorded because the tests caught it: `is_finished()` asked whether any drone existed rather than any *targetable* drone, so a corpse still fading out claimed the track was still running. Both round-end paths were then verified against the real scene rather than only unit-tested — an autoplay run clears 14 of 14 drones for 3645 points, and a pacifist run that never plays a note takes exactly three hits and ends at `lives 0`. |
+| 10 | **Phantom notes fixed; the onset rule now requires an attack** (§4.4, §9.1, §9.8, §13). Reported symptom: with a real acoustic guitar the game emitted a stream of notes nobody played — high, quiet, low-confidence, arriving after the player stopped. Two further faults behind it. First, a *changed pitch* was on its own enough to fire an onset; that is false for a microphone, because a string sheds energy from its fundamental fastest and the estimator eventually starts naming the second harmonic instead. Second, the trailing average was left to converge after an onset and spent five hops reading like an ongoing attack, which held the hysteresis disarmed and made a fast run lose its second note. An absolute noise margin was added on top of the two ratio tests. A legato exception was written, measured, found to readmit the phantoms it was written beside, and removed — a hammer-on is a quiet attack, not an absent one. Playing-technique scenarios moved to `tests/playing_techniques_test.gd` and every one is now run a second time over room tone *louder than the calibration*. |
+| 9 | **The onset rule was rebuilt against real playing** (§4.4, §13). Reported symptom: a live acoustic guitar that had worked in the tuner stopped registering notes in the game. It was not the new input stack — the router forwards faithfully — it was the onset rule, which had been tuned on isolated plucks separated by silence and had never been asked to handle the two things a player does constantly: striking a ringing string again, and changing note before the last one dies. Four faults, each now recorded with its cause: the threshold was set for notes starting from silence; the trailing average followed the signal fast enough to absorb the very transient it was the reference for; loudness was tested two hops late, after the transient had passed; and an attack fired before the ~46 ms analysis window had moved past the *previous* note, so one pluck became two onsets and the first carried the wrong note name. The rule now tests loudness against both the trailing average **and** a rolling trough, latches the verdict across the hops the pitch needs to settle, freezes the average during a transient, and refuses to fire until the window-straddle has passed. Thresholds were **swept against the whole scenario set**, not chosen. Eight playing techniques are now permanent tests, and the one that pins everything is the held note that must fire exactly once — a decaying string's own beating comes within a few percent of a genuine tremolo attack, so sensitivity and false-positive resistance had to be solved together. Two risk-register changes: the milestone-1 risk "onsets were tuned on synthetic attacks" is marked **fired**, since it predicted this failure precisely, and a new one replaces it — **the tuner is not the game**: it draws voiced hops, gameplay reacts to onsets, and a real instrument looked perfect in the tuner for weeks while two thirds of re-strikes were being dropped. |
+| 8 | **The input stack is finished** (§4.1, §4.2, §4.5, §12 milestone 2). `NoteEvent`, `NoteSource`, all three sources and `NoteRouter` shipped; `gameplay.gd` now talks only to the router and cannot tell a guitar from a MIDI keyboard from the `A` key. Four decisions are recorded in §4.1: a failed source **stays attached** so it can say why, and losing the microphone no longer stalls a round because the other sources are independent; **latency compensation belongs to the source**, since the measured round trip is a fact about the microphone and applying it to MIDI would push those notes early by the width of the window they are judged against; **duplicates merge across sources but never within one**, because a re-struck string is the thing the game is listening for; and the router gained a **gate**, because before it only the microphone was quiet during the soundcheck and a MIDI note would have scored during a countdown the player could not see. Two risks retired against real hardware: `InputEvent.device` **is** populated (§4.2, §13 — an MPK mini reported `device = 0`), and MIDI velocity is usable data (0.06–0.53 in ordinary playing). The self-test tone moved from `T` to **`F2`**, because `T` is F♯ once a piano is on the keyboard (§4.5). Added `input_check.tscn` (§9.1), which is how the device question was answered and how a player checks their gear before a set. No new framework touchpoints: every file is game-owned. |
+| 7 | **Latency calibration ships** (§4.6, §9.1, §12 milestone 3): `ui/calibration.tscn` plays a metronome, matches what the player plays against it, and stores the result in `user://dead_metal_jam.cfg`. Four decisions are recorded because three of them contradict what this document previously said. The metronome click is **broadband noise, not a tone** — a tonal click is a note, and the game would confidently measure its own audio. Notes are dated on the **audio clock, not the frame clock**, because a frame's worth of smear is most of a ±60 ms budget. The stored figure is the **median, not the mean** (§4.6 said mean), because eight beats is a small sample and one fumble moves a mean past the tolerance being established. And the detector's own delay is a **measured constant, not a formula**, because a window turns voiced at roughly a third full — two formula-derived versions were written and both failed the test against reality. Latency also **left the settings menu** (§9.4): it is measured, not preferred, and must not travel with a settings profile to a machine with a different sound card. One framework touchpoint was added (§9.5, row 13) — an `instructions_player_one_controls` key, because the solo control card hardcoded "Mouse or arrow keys" and this game's instructions screen was describing controls that do not exist. New risk (§13): **no export templates are installed**, so no build can currently be produced — found on purpose now rather than on deadline night. Also added `OnsetLog` (§9.1): `-- --log` on the tuner dumps per-hop RMS, the trailing average it was judged against and the stable-hop count, which is the measurement the "tuned on synthetic attacks" risk has been waiting for since milestone 1. |
 | 6 | **The game is in the menu.** `game.gd`, `gameplay.gd` and the inherited `gameplay.tscn` landed, so Dead Metal Jam is a real catalogued game: it calls a note, listens, and scores hits and misses by pitch class (any octave counts). Audio plumbing was extracted to `MicCapture` and is now shared with a standalone tuner scene (§9.1), and a **self-test tone** was added because the machine this was built on has no working microphone — §4.3 gained the reason the obvious dead-mic guard does not work. Integration cost two framework findings: `_begin_first_round()` **must** start a round, so the soundcheck now holds the countdown instead of delaying the round (§4.6); and `instructions_video_test.gd` demanded a walkthrough clip from every game even though the screen already supports going without one, which made adding any game require recording a video first (§9.5, row 12). Milestones 2 and 4 are part-done (§12) — the framework half is finished, the content half is not. |
 | 5 | Folder renamed `dead-metal-jam` → **`dead_metal_jam`** to match `slice_and_slash` and `target_rush`, and so the folder name matches the manifest id. All `res://` paths updated. Milestone 1 was then **executed in Godot 4.7.2 for the first time** rather than only in the Python reference port: the suite passes and the real cost is **2.2 ms per window, 10% of the hop budget** — better than the 4 ms the port predicted, so the accuracy and cost figures in §4.4 are now measurements of the shipping code. |
 | 4 | **Milestone 1 built and measured**, and §4.4 rewritten to match what the code actually does rather than what was guessed. Three changes were forced by measurement: the lag range gained a semitone of headroom at each end (a guitar 30 cents flat was falling off the bottom), the peak threshold now compares *interpolated* peaks (raw comparison loses the top octave to its own harmonic), and **the octave-correction pass was removed** — it rescued nothing and broke A5/C6. DC removal became window-mean subtraction so the per-window entry point stays pure. Added the measured accuracy and cost table, marked the milestone done in §12, and retired the "too slow" risk in favour of a new one: onset thresholds are still synthetic. |
