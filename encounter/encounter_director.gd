@@ -54,7 +54,6 @@ const EDGE_POINTS := 25
 
 ## Charged against a note played at a drone that is on the field but wrong.
 const WRONG_NOTE_PENALTY := 25
-
 ## Awarded for clearing a wave without a single drone getting a shot off.
 const SECTION_CLEAR_BONUS := 250
 
@@ -77,6 +76,11 @@ var pitch_matters := true
 ## Widens every timing window by the shared "make it easier" handicap, so the
 ## game reuses `Settings.target_size_scale()` instead of adding a second dial.
 var window_scale := 1.0
+
+## Points charged for a wrong note. Seeded from [constant WRONG_NOTE_PENALTY]
+## and overridden per round from the player's own option, which may take it all
+## the way to zero.
+var wrong_note_penalty := WRONG_NOTE_PENALTY
 
 var _phase: Phase = Phase.IDLE
 var _track: Array = []
@@ -163,7 +167,7 @@ func resolve_note(
 		# Drones are up and the player named none of them: a wrong note, which
 		# costs points and the combo but never a life (§7.3).
 		return _judgement(
-			Judgement.WRONG_NOTE, Tier.OUTSIDE, null, 0.0, -WRONG_NOTE_PENALTY
+			Judgement.WRONG_NOTE, Tier.OUTSIDE, null, 0.0, -wrong_note_penalty
 		)
 
 	var target := _front_most_in_window(matches)

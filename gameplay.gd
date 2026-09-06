@@ -34,9 +34,8 @@ const STREAK_ACHIEVEMENT_TARGET := 10
 ## fight the shell's round timer, its tweens and the pause overlay.
 const HIT_STOP := 0.12
 
-## Waves in a practice track. Replaced by the chart's own section count once
-## the chart format lands (§10).
-const TRACK_WAVES := 4
+## Waves in a practice track are the player's own option now; the chart's own
+## section count replaces them once the chart format lands (§10).
 
 ## Slack added to the round timer on top of the track's own length, so the
 ## backstop never cuts off a drone that is still legitimately in play.
@@ -49,8 +48,8 @@ const MAX_ROUND_SECONDS := 180.0
 
 ## Toggles the microphone self-test tone. A function key rather than a letter
 ## because every letter in the home rows is a piano key once the keyboard
-## source is attached (§4.5).
-const SELF_TEST_KEY := KEY_F2
+## source is attached (§4.5). Rebindable from Settings → Controls, so the key
+## itself is declared in [DmjOptions] and read from [Settings] at press time.
 
 ## Vertical strip reserved at the bottom of the screen for the note readout, so
 ## drones never walk underneath the most important widget in the game (§5.1).
@@ -63,6 +62,7 @@ const READOUT_CLEARANCE := 132.0
 
 var _router: NoteRouter
 var _mic: MicNoteSource
+var _keys: KeyboardNoteSource
 var _director: EncounterDirector
 var _track: Array = []
 var _heard_hold := 0.0
@@ -85,28 +85,42 @@ func game_id() -> String:
 	return GAME_ID
 
 
+## Which inputs are attached is the player's choice (Settings → Game → Note
+## input). Automatic attaches every source that can run on this machine and
+## lets the router decide per note; pinning to one is how a player silences a
+## noisy room or a MIDI controller that is echoing their guitar.
 func _build_playfield() -> void:
 	_router = NoteRouter.new()
 	_router.name = "NoteRouter"
 	_router.note_started.connect(_on_note_started)
 	add_child(_router)
 
-	# Every source that can run on this machine is attached. A source with
-	# nothing to listen to reports itself unavailable rather than being left
-	# out, so the reason can reach the player.
-	_mic = MicNoteSource.new()
-	_mic.name = "MicNoteSource"
-	_mic.calibrated.connect(_on_calibrated)
-	_mic.capture_failed.connect(_on_capture_failed)
-	_router.add_source(_mic)
+	var preference := Settings.tunable_choice(DmjOptions.NOTE_SOURCE_KEY)
 
-	var midi := MidiNoteSource.new()
-	midi.name = "MidiNoteSource"
-	_router.add_source(midi)
+	# A source with nothing to listen to reports itself unavailable rather
+	# than being left out, so the reason can reach the player.
+	if _source_enabled(preference, DmjOptions.SOURCE_MIC):
+		_mic = MicNoteSource.new()
+		_mic.name = "MicNoteSource"
+		_mic.calibrated.connect(_on_calibrated)
+		_mic.capture_failed.connect(_on_capture_failed)
+		_router.add_source(_mic)
 
-	var keys := KeyboardNoteSource.new()
-	keys.name = "KeyboardNoteSource"
-	_router.add_source(keys)
+	if _source_enabled(preference, DmjOptions.SOURCE_MIDI):
+		var midi := MidiNoteSource.new()
+		midi.name = "MidiNoteSource"
+		_router.add_source(midi)
+
+	if _source_enabled(preference, DmjOptions.SOURCE_KEYBOARD):
+		_keys = KeyboardNoteSource.new()
+		_keys.name = "KeyboardNoteSource"
+		_keys.octave_down_key = Settings.binding_keycode(
+			DmjOptions.OCTAVE_DOWN_BINDING
+		)
+		_keys.octave_up_key = Settings.binding_keycode(
+			DmjOptions.OCTAVE_UP_BINDING
+		)
+		_router.add_source(_keys)
 
 	# Nothing scores until the round is actually running.
 	_router.set_accepting(false)
@@ -120,14 +134,22 @@ func _build_playfield() -> void:
 	_playfield.add_child(_director)
 
 
+func _source_enabled(preference: int, source: int) -> bool:
+	return preference == DmjOptions.SOURCE_AUTO or preference == source
+
+
 ## The round starts on the framework's schedule so the shell's round bookkeeping
 ## stays intact, but the countdown is held in [method _update_round] until the
 ## room has been measured. Otherwise the soundcheck would quietly eat the first
 ## couple of seconds of every round.
 func _begin_first_round() -> void:
 	_prompt_root.show()
-	_prompt_caption.text = "SOUNDCHECK"
-	_status_label.text = "Measuring the room. Stay quiet for a moment."
+	if _mic == null:
+		_prompt_caption.text = "INCOMING"
+		_status_label.text = "Play the note printed on each robot."
+	else:
+		_prompt_caption.text = "SOUNDCHECK"
+		_status_label.text = "Measuring the room. Stay quiet for a moment."
 	super()
 
 
@@ -139,7 +161,9 @@ func _begin_first_round() -> void:
 func _load_round_settings() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = _rng.randi()
-	_track = DmjTrackBuilder.build(note_pool, TRACK_WAVES, rng)
+	_track = DmjTrackBuilder.build(
+		note_pool, roundi(Settings.tunable(DmjOptions.WAVES_KEY)), rng
+	)
 	round_duration = clampf(
 		DmjTrackBuilder.duration(_track) + TRACK_TIMER_MARGIN,
 		MIN_ROUND_SECONDS,
@@ -151,8 +175,14 @@ func _load_round_settings() -> void:
 	if _director == null:
 		return
 	# Reuses the shared "make it easier" handicap rather than adding a second
-	# difficulty dial (§6).
-	_director.window_scale = _round_target_size
+	# difficulty dial (§6); the game's own leniency option multiplies into it
+	# so the two agree instead of competing.
+	_director.window_scale = (
+		_round_target_size * Settings.tunable(DmjOptions.TIMING_WINDOW_KEY)
+	)
+	_director.wrong_note_penalty = roundi(
+		Settings.tunable(DmjOptions.WRONG_NOTE_PENALTY_KEY)
+	)
 	_director.set_reduced_motion(_reduced_motion_enabled)
 
 
@@ -189,14 +219,16 @@ func _finish_round() -> void:
 
 
 func _update_round(delta: float, _time_left: float) -> void:
-	if _mic == null:
+	if _router == null:
 		return
 
 	# Nothing the player does can score while the room is still being measured,
 	# so the countdown waits for them rather than the other way round. This
 	# gates every source, not just the microphone: a MIDI note played during
-	# the soundcheck is no more scoreable than a strummed one.
-	var calibrating := _mic.is_calibrating()
+	# the soundcheck is no more scoreable than a strummed one. With the
+	# microphone switched off there is no room to measure, so play starts at
+	# once.
+	var calibrating := _mic != null and _mic.is_calibrating()
 	_round_timer.paused = calibrating
 	_router.set_accepting(not calibrating and not _player_is_out(PLAYER_ONE))
 	if calibrating:
@@ -232,16 +264,36 @@ func _playfield_bounds() -> Rect2:
 
 ## The self-test tone is reachable during a round because a silent microphone
 ## and a broken analyser look identical from the player's side of the screen.
+## The key is the player's own binding, not a fixed one.
 func _handle_gameplay_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
 	var key := event as InputEventKey
-	if not key.pressed or key.echo or key.keycode != SELF_TEST_KEY:
+	if not key.pressed or key.echo:
+		return
+	if key.keycode != Settings.binding_keycode(DmjOptions.SELF_TEST_BINDING):
+		return
+	if _mic == null:
+		_status_label.text = "The microphone is switched off in Settings."
 		return
 	if _mic.toggle_test_tone():
 		_status_label.text = "Self-test: playing %s for you." % MicCapture.test_tone_label()
 	else:
 		_status_label.text = "Back on the microphone."
+
+
+## The practice keyboard's octave keys are rebindable, so a change made from
+## the pause menu reaches the live source rather than waiting for a new round.
+func _on_controls_changed() -> void:
+	super()
+	if _keys == null:
+		return
+	_keys.octave_down_key = Settings.binding_keycode(
+		DmjOptions.OCTAVE_DOWN_BINDING
+	)
+	_keys.octave_up_key = Settings.binding_keycode(
+		DmjOptions.OCTAVE_UP_BINDING
+	)
 
 
 ## One note, from whichever input produced it. By the time it arrives the
@@ -447,4 +499,6 @@ func _on_capture_failed(reason: String) -> void:
 		]
 		return
 	_prompt_caption.text = "NO INPUT"
-	_status_label.text = "%s Press F2 to play a test tone instead." % reason
+	_status_label.text = "%s Press %s to play a test tone instead." % [
+		reason, Settings.binding_key_label(DmjOptions.SELF_TEST_BINDING)
+	]

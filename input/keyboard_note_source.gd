@@ -51,6 +51,12 @@ const DEFAULT_BASE_MIDI := 48
 const OCTAVE_DOWN_KEY := KEY_Z
 const OCTAVE_UP_KEY := KEY_X
 
+## The octave keys are rebindable, so they are variables seeded with the
+## defaults above rather than the constants themselves. The game sets them
+## from [Settings]; the tests and the tutorial capture leave them alone.
+var octave_down_key := OCTAVE_DOWN_KEY
+var octave_up_key := OCTAVE_UP_KEY
+
 ## Keyboards have no velocity. A constant is the honest answer; inventing one
 ## from key-repeat timing would be a guess dressed up as data.
 const FIXED_VELOCITY := 0.8
@@ -93,11 +99,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_release(key.keycode)
 		return
 
-	if key.keycode == OCTAVE_DOWN_KEY:
+	if key.keycode == octave_down_key:
 		_shift_octave(-12)
 		get_viewport().set_input_as_handled()
 		return
-	if key.keycode == OCTAVE_UP_KEY:
+	if key.keycode == octave_up_key:
 		_shift_octave(12)
 		get_viewport().set_input_as_handled()
 		return
