@@ -1,0 +1,171 @@
+[gd_resource type="Resource" script_class="JamChart" format=3]
+
+[ext_resource type="AudioStream" path="res://games/dead_metal_jam/assets/track_02.ogg" id="1_audio"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_chart.gd" id="2_chart"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_section.gd" id="3_section"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_beat.gd" id="4_beat"]
+
+[sub_resource type="Resource" id="Beat_0_0"]
+script = ExtResource("4_beat")
+note = 45
+
+[sub_resource type="Resource" id="Beat_0_1"]
+script = ExtResource("4_beat")
+time = 3.6
+note = 52
+
+[sub_resource type="Resource" id="Beat_0_2"]
+script = ExtResource("4_beat")
+time = 7.2
+note = 48
+
+[sub_resource type="Resource" id="Beat_0_3"]
+script = ExtResource("4_beat")
+time = 10.8
+note = 55
+
+[sub_resource type="Resource" id="Section_0"]
+script = ExtResource("3_section")
+name = "INTRO"
+wave_archetype = "walk_in"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_0_0"), SubResource("Beat_0_1"), SubResource("Beat_0_2"), SubResource("Beat_0_3")])
+
+[sub_resource type="Resource" id="Beat_1_0"]
+script = ExtResource("4_beat")
+time = 14.4
+note = 45
+
+[sub_resource type="Resource" id="Beat_1_1"]
+script = ExtResource("4_beat")
+time = 16.8
+note = 48
+
+[sub_resource type="Resource" id="Beat_1_2"]
+script = ExtResource("4_beat")
+time = 19.2
+note = 50
+
+[sub_resource type="Resource" id="Beat_1_3"]
+script = ExtResource("4_beat")
+time = 21.6
+note = 52
+
+[sub_resource type="Resource" id="Beat_1_4"]
+script = ExtResource("4_beat")
+time = 24
+note = 50
+
+[sub_resource type="Resource" id="Section_1"]
+script = ExtResource("3_section")
+name = "VERSE"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_1_0"), SubResource("Beat_1_1"), SubResource("Beat_1_2"), SubResource("Beat_1_3"), SubResource("Beat_1_4")])
+
+[sub_resource type="Resource" id="Beat_2_0"]
+script = ExtResource("4_beat")
+time = 26.4
+note = 57
+
+[sub_resource type="Resource" id="Beat_2_1"]
+script = ExtResource("4_beat")
+time = 28.2
+note = 55
+
+[sub_resource type="Resource" id="Beat_2_2"]
+script = ExtResource("4_beat")
+time = 30
+note = 52
+notes = Array[int]([52, 48])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Beat_2_3"]
+script = ExtResource("4_beat")
+time = 31.8
+note = 50
+
+[sub_resource type="Resource" id="Beat_2_4"]
+script = ExtResource("4_beat")
+time = 33.6
+note = 48
+
+[sub_resource type="Resource" id="Beat_2_5"]
+script = ExtResource("4_beat")
+time = 35.4
+note = 45
+
+[sub_resource type="Resource" id="Section_2"]
+script = ExtResource("3_section")
+name = "CHORUS"
+wave_archetype = "press"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_2_0"), SubResource("Beat_2_1"), SubResource("Beat_2_2"), SubResource("Beat_2_3"), SubResource("Beat_2_4"), SubResource("Beat_2_5")])
+
+[sub_resource type="Resource" id="Beat_3_0"]
+script = ExtResource("4_beat")
+time = 38.4
+note = 45
+notes = Array[int]([45, 48, 52])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Beat_3_1"]
+script = ExtResource("4_beat")
+time = 43.2
+note = 50
+
+[sub_resource type="Resource" id="Beat_3_2"]
+script = ExtResource("4_beat")
+time = 48
+note = 55
+notes = Array[int]([55, 52])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Section_3"]
+script = ExtResource("3_section")
+name = "BRIDGE"
+wave_archetype = "hold"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_3_0"), SubResource("Beat_3_1"), SubResource("Beat_3_2")])
+
+[sub_resource type="Resource" id="Beat_4_0"]
+script = ExtResource("4_beat")
+time = 52.8
+note = 45
+
+[sub_resource type="Resource" id="Beat_4_1"]
+script = ExtResource("4_beat")
+time = 54.6
+note = 48
+
+[sub_resource type="Resource" id="Beat_4_2"]
+script = ExtResource("4_beat")
+time = 56.4
+note = 50
+
+[sub_resource type="Resource" id="Beat_4_3"]
+script = ExtResource("4_beat")
+time = 58.2
+note = 52
+
+[sub_resource type="Resource" id="Beat_4_4"]
+script = ExtResource("4_beat")
+time = 60
+note = 55
+
+[sub_resource type="Resource" id="Beat_4_5"]
+script = ExtResource("4_beat")
+time = 61.8
+note = 57
+
+[sub_resource type="Resource" id="Section_4"]
+script = ExtResource("3_section")
+name = "OUTRO"
+wave_archetype = "press"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_4_0"), SubResource("Beat_4_1"), SubResource("Beat_4_2"), SubResource("Beat_4_3"), SubResource("Beat_4_4"), SubResource("Beat_4_5")])
+
+[resource]
+script = ExtResource("2_chart")
+title = "Scrapyard Stomp"
+artist = "DeskCanSaw"
+bpm = 100
+audio = ExtResource("1_audio")
+sections = Array[ExtResource("3_section")]([SubResource("Section_0"), SubResource("Section_1"), SubResource("Section_2"), SubResource("Section_3"), SubResource("Section_4")])

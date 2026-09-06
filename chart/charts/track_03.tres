@@ -1,0 +1,221 @@
+[gd_resource type="Resource" script_class="JamChart" format=3]
+
+[ext_resource type="AudioStream" path="res://games/dead_metal_jam/assets/track_03.ogg" id="1_audio"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_chart.gd" id="2_chart"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_section.gd" id="3_section"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_beat.gd" id="4_beat"]
+
+[sub_resource type="Resource" id="Beat_0_0"]
+script = ExtResource("4_beat")
+note = 40
+
+[sub_resource type="Resource" id="Beat_0_1"]
+script = ExtResource("4_beat")
+time = 2.143
+note = 47
+
+[sub_resource type="Resource" id="Beat_0_2"]
+script = ExtResource("4_beat")
+time = 4.286
+note = 43
+
+[sub_resource type="Resource" id="Beat_0_3"]
+script = ExtResource("4_beat")
+time = 6.429
+note = 50
+
+[sub_resource type="Resource" id="Section_0"]
+script = ExtResource("3_section")
+name = "INTRO"
+wave_archetype = "walk_in"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_0_0"), SubResource("Beat_0_1"), SubResource("Beat_0_2"), SubResource("Beat_0_3")])
+
+[sub_resource type="Resource" id="Beat_1_0"]
+script = ExtResource("4_beat")
+time = 8.571
+note = 40
+
+[sub_resource type="Resource" id="Beat_1_1"]
+script = ExtResource("4_beat")
+time = 10
+note = 43
+
+[sub_resource type="Resource" id="Beat_1_2"]
+script = ExtResource("4_beat")
+time = 11.429
+note = 45
+
+[sub_resource type="Resource" id="Beat_1_3"]
+script = ExtResource("4_beat")
+time = 12.857
+note = 47
+
+[sub_resource type="Resource" id="Beat_1_4"]
+script = ExtResource("4_beat")
+time = 14.286
+note = 45
+
+[sub_resource type="Resource" id="Beat_1_5"]
+script = ExtResource("4_beat")
+time = 15.714
+note = 43
+
+[sub_resource type="Resource" id="Section_1"]
+script = ExtResource("3_section")
+name = "VERSE"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_1_0"), SubResource("Beat_1_1"), SubResource("Beat_1_2"), SubResource("Beat_1_3"), SubResource("Beat_1_4"), SubResource("Beat_1_5")])
+
+[sub_resource type="Resource" id="Beat_2_0"]
+script = ExtResource("4_beat")
+time = 17.143
+note = 52
+
+[sub_resource type="Resource" id="Beat_2_1"]
+script = ExtResource("4_beat")
+time = 18.214
+note = 50
+
+[sub_resource type="Resource" id="Beat_2_2"]
+script = ExtResource("4_beat")
+time = 19.286
+note = 47
+notes = Array[int]([47, 43])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Beat_2_3"]
+script = ExtResource("4_beat")
+time = 20.357
+note = 45
+
+[sub_resource type="Resource" id="Beat_2_4"]
+script = ExtResource("4_beat")
+time = 21.429
+note = 43
+
+[sub_resource type="Resource" id="Beat_2_5"]
+script = ExtResource("4_beat")
+time = 22.5
+note = 40
+
+[sub_resource type="Resource" id="Section_2"]
+script = ExtResource("3_section")
+name = "CHORUS"
+wave_archetype = "press"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_2_0"), SubResource("Beat_2_1"), SubResource("Beat_2_2"), SubResource("Beat_2_3"), SubResource("Beat_2_4"), SubResource("Beat_2_5")])
+
+[sub_resource type="Resource" id="Beat_3_0"]
+script = ExtResource("4_beat")
+time = 25.714
+note = 40
+notes = Array[int]([40, 43, 47])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Beat_3_1"]
+script = ExtResource("4_beat")
+time = 28.571
+note = 45
+
+[sub_resource type="Resource" id="Beat_3_2"]
+script = ExtResource("4_beat")
+time = 31.429
+note = 52
+notes = Array[int]([52, 47])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Section_3"]
+script = ExtResource("3_section")
+name = "BRIDGE"
+wave_archetype = "hold"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_3_0"), SubResource("Beat_3_1"), SubResource("Beat_3_2")])
+
+[sub_resource type="Resource" id="Beat_4_0"]
+script = ExtResource("4_beat")
+time = 34.286
+note = 47
+
+[sub_resource type="Resource" id="Beat_4_1"]
+script = ExtResource("4_beat")
+time = 35.714
+note = 50
+
+[sub_resource type="Resource" id="Beat_4_2"]
+script = ExtResource("4_beat")
+time = 37.143
+note = 52
+
+[sub_resource type="Resource" id="Beat_4_3"]
+script = ExtResource("4_beat")
+time = 38.571
+note = 50
+
+[sub_resource type="Resource" id="Beat_4_4"]
+script = ExtResource("4_beat")
+time = 40
+note = 47
+
+[sub_resource type="Resource" id="Beat_4_5"]
+script = ExtResource("4_beat")
+time = 41.429
+note = 45
+
+[sub_resource type="Resource" id="Section_4"]
+script = ExtResource("3_section")
+name = "SOLO"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_4_0"), SubResource("Beat_4_1"), SubResource("Beat_4_2"), SubResource("Beat_4_3"), SubResource("Beat_4_4"), SubResource("Beat_4_5")])
+
+[sub_resource type="Resource" id="Beat_5_0"]
+script = ExtResource("4_beat")
+time = 42.857
+note = 40
+
+[sub_resource type="Resource" id="Beat_5_1"]
+script = ExtResource("4_beat")
+time = 43.929
+note = 43
+
+[sub_resource type="Resource" id="Beat_5_2"]
+script = ExtResource("4_beat")
+time = 45
+note = 45
+
+[sub_resource type="Resource" id="Beat_5_3"]
+script = ExtResource("4_beat")
+time = 46.071
+note = 47
+
+[sub_resource type="Resource" id="Beat_5_4"]
+script = ExtResource("4_beat")
+time = 47.143
+note = 50
+
+[sub_resource type="Resource" id="Beat_5_5"]
+script = ExtResource("4_beat")
+time = 48.214
+note = 52
+
+[sub_resource type="Resource" id="Beat_5_6"]
+script = ExtResource("4_beat")
+time = 49.286
+note = 47
+
+[sub_resource type="Resource" id="Beat_5_7"]
+script = ExtResource("4_beat")
+time = 50.357
+note = 40
+
+[sub_resource type="Resource" id="Section_5"]
+script = ExtResource("3_section")
+name = "OUTRO"
+wave_archetype = "press"
+beats = Array[ExtResource("4_beat")]([SubResource("Beat_5_0"), SubResource("Beat_5_1"), SubResource("Beat_5_2"), SubResource("Beat_5_3"), SubResource("Beat_5_4"), SubResource("Beat_5_5"), SubResource("Beat_5_6"), SubResource("Beat_5_7")])
+
+[resource]
+script = ExtResource("2_chart")
+title = "Overdrive"
+artist = "DeskCanSaw"
+bpm = 168
+audio = ExtResource("1_audio")
+sections = Array[ExtResource("3_section")]([SubResource("Section_0"), SubResource("Section_1"), SubResource("Section_2"), SubResource("Section_3"), SubResource("Section_4"), SubResource("Section_5")])

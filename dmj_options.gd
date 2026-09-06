@@ -18,6 +18,8 @@ extends RefCounted
 const GAME_ID := "dead_metal_jam"
 
 const WAVES_KEY := "game/dmj_waves"
+const MODE_KEY := "game/dmj_mode"
+const TRACK_KEY := "game/dmj_track"
 const TIMING_WINDOW_KEY := "game/dmj_timing_window"
 const WRONG_NOTE_PENALTY_KEY := "game/dmj_wrong_note_penalty"
 const NOTE_SOURCE_KEY := "game/dmj_note_source"
@@ -39,6 +41,53 @@ const SOURCE_MIC := 1
 const SOURCE_MIDI := 2
 const SOURCE_KEYBOARD := 3
 
+## What a round is staged from. A song is a charted track — named sections, the
+## rail advance between them, and the full roster (§10). The practice ramp is
+## the generated one: the same rules, endlessly, with the wave count as its
+## only dial, which is what a player wants when they are learning an instrument
+## rather than playing a song.
+##
+## Both compile to the same plain data, so nothing downstream can tell them
+## apart (§9.1).
+##
+## **The numbers are not in menu order, and they must not be renumbered.** A
+## tunable's value is what gets written to `user://settings.cfg`, so shuffling
+## these to read tidily would silently move every player who had chosen the
+## practice ramp onto a song. The two values that shipped in milestone 6 keep
+## the meanings they shipped with, and the tracks added in milestone 8 are
+## appended. `TRACK_CHOICES` below decides the order the player sees.
+const TRACK_SONG := 0
+const TRACK_PRACTICE := 1
+const TRACK_SONG_02 := 2
+const TRACK_SONG_03 := 3
+
+## Where each song's chart lives. A path constant is data, so it belongs with
+## the choice it names rather than in `gameplay.gd`, which would otherwise hold
+## a second list that could disagree with this one about how many songs there
+## are. `jam_chart_test.gd` loads every entry.
+const CHART_PATHS := {
+	TRACK_SONG: "res://games/dead_metal_jam/chart/charts/track_01.tres",
+	TRACK_SONG_02: "res://games/dead_metal_jam/chart/charts/track_02.tres",
+	TRACK_SONG_03: "res://games/dead_metal_jam/chart/charts/track_03.tres",
+}
+
+## Menu order: the three songs by tempo, then the ramp. The titles are the
+## songs' own, because a player picking a track is picking music.
+const TRACK_CHOICES: Array[Dictionary] = [
+	{"value": TRACK_SONG, "title": "Demo — 140 BPM"},
+	{"value": TRACK_SONG_02, "title": "Scrapyard Stomp — 100 BPM"},
+	{"value": TRACK_SONG_03, "title": "Overdrive — 168 BPM"},
+	{"value": TRACK_PRACTICE, "title": "Practice ramp"},
+]
+
+## How a round is judged (§3). These mirror [enum EncounterDirector.Mode] and
+## are repeated rather than imported so this file keeps its one real
+## constraint — it is parsed by headless test scripts and must drag in nothing.
+## `encounter_test.gd` asserts the two lists agree, so they cannot drift.
+const MODE_JAM := 0
+const MODE_RHYTHM := 1
+const MODE_DEMO := 2
+
 const MIN_WAVES := 1
 const MAX_WAVES := 12
 const MIN_TIMING_WINDOW := 0.6
@@ -46,9 +95,11 @@ const MAX_TIMING_WINDOW := 2.0
 const MIN_WRONG_NOTE_PENALTY := 0
 const MAX_WRONG_NOTE_PENALTY := 100
 
-## The shipped chart: four waves judged on the windows the tiers were tuned
-## against, with a wrong note costing a quarter of an edge hit.
+## The practice ramp's own dial. The shipped song brings its own sections, so
+## this only decides how long the generated ramp runs.
 const DEFAULT_WAVES := 4
+const DEFAULT_TRACK := TRACK_SONG
+const DEFAULT_MODE := MODE_JAM
 const DEFAULT_TIMING_WINDOW := 1.0
 const DEFAULT_WRONG_NOTE_PENALTY := 25
 const DEFAULT_NOTE_SOURCE := SOURCE_AUTO
@@ -58,14 +109,45 @@ const INPUT_HEADING := "Instrument input"
 
 const TUNABLES: Array[Dictionary] = [
 	{
+		"key": MODE_KEY,
+		"type": GameManifest.OPTION_CHOICE,
+		"default": DEFAULT_MODE,
+		"title": "Mode",
+		"description": (
+			"Jam is the game. Rhythm ignores which note you play and scores "
+			+ "only your timing. Demo waits at every beat until you play it, "
+			+ "and nothing can hurt you."
+		),
+		"heading": TRACK_HEADING,
+		"choices": [
+			{"value": MODE_JAM, "title": "Jam"},
+			{"value": MODE_RHYTHM, "title": "Rhythm — any note"},
+			{"value": MODE_DEMO, "title": "Demo — time waits for you"},
+		],
+	},
+	{
+		"key": TRACK_KEY,
+		"type": GameManifest.OPTION_CHOICE,
+		"default": DEFAULT_TRACK,
+		"title": "Track",
+		"description": (
+			"Each song is charted: named sections, a rail advance between "
+			+ "them, and armoured robots that ask for a phrase. The practice "
+			+ "ramp just keeps sending waves."
+		),
+		"heading": TRACK_HEADING,
+		"choices": TRACK_CHOICES,
+	},
+	{
 		"key": WAVES_KEY,
 		"default": float(DEFAULT_WAVES),
 		"min": float(MIN_WAVES),
 		"max": float(MAX_WAVES),
 		"step": 1.0,
-		"title": "Waves per track",
+		"title": "Practice waves",
 		"description": (
-			"Sets how long a track runs. The round timer follows the track."
+			"How long the practice ramp runs. The round timer follows the "
+			+ "track; the song brings its own sections."
 		),
 		"format": GameManifest.FORMAT_COUNT,
 		"heading": TRACK_HEADING,
@@ -147,3 +229,18 @@ const CONTROL_BINDINGS: Array[Dictionary] = [
 		"heading": "Practice keyboard",
 	},
 ]
+
+
+## True when [param choice] names a charted song rather than the generated ramp.
+static func is_song(choice: int) -> bool:
+	return CHART_PATHS.has(choice)
+
+
+## The chart behind [param choice], or empty for the practice ramp.
+##
+## Empty is also what an *unrecognised* value gets, and that is deliberate: a
+## `user://settings.cfg` written by a build with more tracks in it must still
+## open a round on this one. Falling back to the ramp costs the player their
+## chosen song; refusing to resolve would cost them the round.
+static func chart_path(choice: int) -> String:
+	return str(CHART_PATHS.get(choice, ""))

@@ -10,7 +10,7 @@ extends SceneTree
 ##
 ## The scene is loaded at runtime rather than preloaded — its script uses
 ## autoload instances, which do not exist while a `--script` run is compiling
-## this file. [RustDrone] and [DmjIntroSound] touch no autoload, so they can be
+## this file. [RustyClanky] and [DmjIntroSound] touch no autoload, so they can be
 ## named directly.
 ##
 ## The timeline is driven by hand with a fixed timestep instead of by the
@@ -38,8 +38,10 @@ func _init() -> void:
 func _run() -> void:
 	_test_sounds_are_audible()
 	_test_pitch_is_standard()
+	_test_backing_track_is_a_bed()
 	_test_manifest_declares_the_intro()
 	await _test_timeline()
+	await _test_music_starts_with_the_scene()
 	await _test_reduced_motion_reaches_the_actors()
 	_finish()
 
@@ -80,6 +82,33 @@ func _test_pitch_is_standard() -> void:
 		absf(DmjIntroSound.frequency(81) - 880.0) < 0.01,
 		"An octave up must double the frequency."
 	)
+
+
+## The opening's backing track is a bed, not a loop.
+##
+## The opening is nine seconds long and the track is minutes long, so nothing
+## on screen would ever reveal a loop flag left on — it would only show up
+## much later, in whatever scene inherited the still-playing stream. Checked
+## here because looping is set by the `.import`, which no other test reads.
+func _test_backing_track_is_a_bed() -> void:
+	var script := load(INTRO_SCENE) as PackedScene
+	var intro := script.instantiate() if script else null
+	if intro == null:
+		_failures.append("The opening must instantiate to be checked.")
+		return
+
+	var music: AudioStream = intro.get("music")
+	_expect(music != null, "The opening must carry a backing track.")
+	if music != null:
+		_expect(
+			not bool(music.get("loop")),
+			"The opening's backing track must not loop."
+		)
+		_expect(
+			music.get_length() >= 9.0,
+			"It must outlast the opening it plays under."
+		)
+	intro.free()
 
 
 func _peak(stream: AudioStreamWAV) -> float:
@@ -154,7 +183,7 @@ func _test_timeline() -> void:
 	_advance(intro, 1.5)
 	_expect(_targetable(drones) == 0, "The last note must clear the stage.")
 	_expect(
-		_in_state(drones, RustDrone.State.DEAD) == 3,
+		_in_state(drones, RustyClanky.State.DEAD) == 3,
 		"Every drone must be answered — the opening must never show a drone firing."
 	)
 
@@ -174,6 +203,44 @@ func _test_timeline() -> void:
 		_skip_is_wired(intro), "The opening must be skippable from the Skip button."
 	)
 
+	intro.queue_free()
+	await process_frame
+
+
+## The bed starts with the scene, not on a cue part-way through it.
+##
+## `_start_music()` is one line and looks impossible to get wrong, but it is
+## the only thing standing between the opening and silence: it is reached
+## through `_ready`, and the two lines above it read Settings and can throw the
+## whole method away on a machine where they fail. Playing is checked, not
+## called.
+func _test_music_starts_with_the_scene() -> void:
+	var audio := get_root().get_node_or_null("AudioManager")
+	if audio == null:
+		_failures.append("AudioManager must be available to the intro test.")
+		return
+
+	var intro := await _open_intro()
+	if intro == null:
+		return
+	await _settle()
+
+	var playing: Array[AudioStream] = []
+	for child in audio.get_children():
+		var player := child as AudioStreamPlayer
+		if player != null and player.playing and player.stream != null:
+			playing.append(player.stream)
+
+	# Membership, not "something is playing": the manager's SFX pool lives in
+	# the same list, and a stray ping from the cue before this one would
+	# otherwise answer for the music.
+	_expect(not playing.is_empty(), "The opening must leave audio running.")
+	_expect(
+		playing.has(intro.get("music")),
+		"And the opening's own backing track must be one of the streams playing."
+	)
+
+	audio.call("stop_music", 0.05)
 	intro.queue_free()
 	await process_frame
 
@@ -254,7 +321,7 @@ func _targetable(drones: Node2D) -> int:
 	return alive
 
 
-func _in_state(drones: Node2D, state: RustDrone.State) -> int:
+func _in_state(drones: Node2D, state: RustyClanky.State) -> int:
 	var matching := 0
 	for drone in drones.get_children():
 		if int(drone.get("state")) == int(state):

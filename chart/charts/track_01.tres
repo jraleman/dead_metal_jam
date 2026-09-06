@@ -1,0 +1,171 @@
+[gd_resource type="Resource" script_class="JamChart" format=3]
+
+[ext_resource type="AudioStream" path="res://games/dead_metal_jam/assets/demo.ogg" id="1_24688"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_chart.gd" id="2_d67e6"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_section.gd" id="3_r4rt6"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_beat.gd" id="4_to7pb"]
+
+[sub_resource type="Resource" id="Resource_vnk75"]
+script = ExtResource("4_to7pb")
+note = 40
+
+[sub_resource type="Resource" id="Resource_a55yq"]
+script = ExtResource("4_to7pb")
+time = 2.571
+note = 45
+
+[sub_resource type="Resource" id="Resource_qkqka"]
+script = ExtResource("4_to7pb")
+time = 5.143
+note = 50
+
+[sub_resource type="Resource" id="Resource_on2ch"]
+script = ExtResource("4_to7pb")
+time = 7.714
+note = 64
+
+[sub_resource type="Resource" id="Resource_rmest"]
+script = ExtResource("3_r4rt6")
+name = "INTRO"
+wave_archetype = "walk_in"
+beats = Array[ExtResource("4_to7pb")]([SubResource("Resource_vnk75"), SubResource("Resource_a55yq"), SubResource("Resource_qkqka"), SubResource("Resource_on2ch")])
+
+[sub_resource type="Resource" id="Resource_6jidi"]
+script = ExtResource("4_to7pb")
+time = 10.286
+note = 55
+
+[sub_resource type="Resource" id="Resource_rtw7h"]
+script = ExtResource("4_to7pb")
+time = 12.0
+note = 59
+
+[sub_resource type="Resource" id="Resource_4jwdq"]
+script = ExtResource("4_to7pb")
+time = 13.714
+note = 45
+
+[sub_resource type="Resource" id="Resource_j7brl"]
+script = ExtResource("4_to7pb")
+time = 15.429
+note = 40
+
+[sub_resource type="Resource" id="Resource_gf7d4"]
+script = ExtResource("4_to7pb")
+time = 17.143
+note = 50
+
+[sub_resource type="Resource" id="Resource_pg6jo"]
+script = ExtResource("3_r4rt6")
+name = "VERSE"
+beats = Array[ExtResource("4_to7pb")]([SubResource("Resource_6jidi"), SubResource("Resource_rtw7h"), SubResource("Resource_4jwdq"), SubResource("Resource_j7brl"), SubResource("Resource_gf7d4")])
+
+[sub_resource type="Resource" id="Resource_w1olm"]
+script = ExtResource("4_to7pb")
+time = 20.571
+note = 64
+
+[sub_resource type="Resource" id="Resource_21260"]
+script = ExtResource("4_to7pb")
+time = 21.857
+note = 59
+
+[sub_resource type="Resource" id="Resource_wgwx7"]
+script = ExtResource("4_to7pb")
+time = 23.143
+note = 55
+notes = Array[int]([55, 50])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Resource_x01do"]
+script = ExtResource("4_to7pb")
+time = 24.429000000000002
+note = 45
+
+[sub_resource type="Resource" id="Resource_3s6iy"]
+script = ExtResource("4_to7pb")
+time = 25.714000000000002
+note = 40
+
+[sub_resource type="Resource" id="Resource_vgoyt"]
+script = ExtResource("4_to7pb")
+time = 27.0
+note = 64
+
+[sub_resource type="Resource" id="Resource_n6fry"]
+script = ExtResource("3_r4rt6")
+name = "CHORUS"
+wave_archetype = "press"
+beats = Array[ExtResource("4_to7pb")]([SubResource("Resource_w1olm"), SubResource("Resource_21260"), SubResource("Resource_wgwx7"), SubResource("Resource_x01do"), SubResource("Resource_3s6iy"), SubResource("Resource_vgoyt")])
+
+[sub_resource type="Resource" id="Resource_m3t6a"]
+script = ExtResource("4_to7pb")
+time = 30.857
+note = 40
+notes = Array[int]([40, 45, 50])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Resource_w7i3c"]
+script = ExtResource("4_to7pb")
+time = 34.286
+note = 50
+
+[sub_resource type="Resource" id="Resource_sn2s7"]
+script = ExtResource("4_to7pb")
+time = 37.714
+note = 64
+notes = Array[int]([64, 59])
+lane = 1
+enemy = "plated_knuckle"
+
+[sub_resource type="Resource" id="Resource_nowme"]
+script = ExtResource("3_r4rt6")
+name = "BRIDGE"
+wave_archetype = "hold"
+beats = Array[ExtResource("4_to7pb")]([SubResource("Resource_m3t6a"), SubResource("Resource_w7i3c"), SubResource("Resource_sn2s7")])
+
+[sub_resource type="Resource" id="Resource_3nibl"]
+script = ExtResource("4_to7pb")
+time = 41.143
+note = 40
+
+[sub_resource type="Resource" id="Resource_i0aem"]
+script = ExtResource("4_to7pb")
+time = 42.429
+note = 45
+
+[sub_resource type="Resource" id="Resource_8jnjf"]
+script = ExtResource("4_to7pb")
+time = 43.714
+note = 50
+
+[sub_resource type="Resource" id="Resource_qu847"]
+script = ExtResource("4_to7pb")
+time = 45.0
+note = 55
+
+[sub_resource type="Resource" id="Resource_5qj4t"]
+script = ExtResource("4_to7pb")
+time = 46.286
+note = 59
+
+[sub_resource type="Resource" id="Resource_or81x"]
+script = ExtResource("4_to7pb")
+time = 47.571
+note = 64
+
+[sub_resource type="Resource" id="Resource_rv1kj"]
+script = ExtResource("3_r4rt6")
+name = "OUTRO"
+wave_archetype = "press"
+beats = Array[ExtResource("4_to7pb")]([SubResource("Resource_3nibl"), SubResource("Resource_i0aem"), SubResource("Resource_8jnjf"), SubResource("Resource_qu847"), SubResource("Resource_5qj4t"), SubResource("Resource_or81x")])
+
+[resource]
+script = ExtResource("2_d67e6")
+title = "Demo"
+artist = "DeskCanSaw"
+bpm = 140.0
+audio = ExtResource("1_24688")
+sections = Array[ExtResource("3_r4rt6")]([SubResource("Resource_rmest"), SubResource("Resource_pg6jo"), SubResource("Resource_n6fry"), SubResource("Resource_nowme"), SubResource("Resource_rv1kj")])

@@ -29,6 +29,9 @@ static func manifest() -> GameManifest:
 	game.tunables = DmjOptions.TUNABLES
 	game.control_bindings = DmjOptions.CONTROL_BINDINGS
 	game.copy = {
+		# Kept for a build that re-enables two players: this game declares
+		# `supports_multiplayer = false`, so mode select is skipped entirely and
+		# Play goes straight to the instructions.
 		"mode_select_intro": "Tune up and pick your round.",
 		"mode_select_hint": "Bring an instrument — the game listens to your microphone.",
 		"single_player_description": (
@@ -43,8 +46,8 @@ static func manifest() -> GameManifest:
 		),
 		"instructions_headline": "Play the note the robot calls",
 		"instructions_rules": (
-			"Right note +1  ·  Wrong note -1  ·  Play louder than the room  ·  "
-			+ "Esc pauses"
+			"Right note scores  ·  Wrong note -25, never below zero  ·  "
+			+ "Play louder than the room  ·  Esc pauses"
 		),
 		"instructions_demo_prompt": "PLAY THE NOTE SHOWN ON SCREEN",
 		"instructions_solo_summary": (
@@ -62,6 +65,19 @@ static func manifest() -> GameManifest:
 		),
 	}
 	game.stats_url = "https://deskcansaw.com/stats/dmj"
+	# The card's artwork is this game's own scene, not one of the framework's
+	# two built-in styles (§9.5). A corridor of robots calling notes is the
+	# whole pitch of the game, and it is not something the base project should
+	# be asked to know how to draw.
+	game.share_art_scene_path = "res://games/dead_metal_jam/ui/share_art.tscn"
+	# Recorded against Scrapyard Stomp rather than the practice ramp: the ramp
+	# is seeded from the clock, so its captions would describe a take nobody
+	# else will ever get. Re-record with
+	# `tools/record_tutorials.ps1 -Games dead_metal_jam`.
+	game.tutorial_video_path = "res://assets/video/tutorial_dead_metal_jam.ogv"
+	game.tutorial_poster_path = (
+		"res://assets/video/tutorial_dead_metal_jam_poster.webp"
+	)
 	game.theme = _theme()
 	game.credits = [
 		{
@@ -86,15 +102,34 @@ static func manifest() -> GameManifest:
 		},
 	]
 	game.achievements = {
-		"first_note": {
-			"title": "First Blood",
-			"description": "Play your first correct note.",
-			"badge": "NOTE",
+		# The ladder is deliberately shallow at the bottom and steep at the
+		# top: finishing a track at all is the first one, and the other four
+		# each ask for one specific thing to be done well rather than for the
+		# same run to be done again with a bigger number attached (§9.6).
+		"jam_first_track": {
+			"title": "Soundcheck",
+			"description": "Finish a track in any mode.",
+			"badge": "SET",
 		},
-		"clean_streak": {
-			"title": "In The Pocket",
-			"description": "Hit ten notes in a row without a miss.",
-			"badge": "x10",
+		"jam_perfect_section": {
+			"title": "Tight",
+			"description": "Clear a whole section with every robot dropped on a Perfect.",
+			"badge": "100",
+		},
+		"jam_no_damage": {
+			"title": "Untouched",
+			"description": "Finish a Jam track without letting a single robot fire.",
+			"badge": "0",
+		},
+		"jam_mic_run": {
+			"title": "Unplugged",
+			"description": "Finish a Jam track played entirely into the microphone.",
+			"badge": "MIC",
+		},
+		"jam_combo_eight": {
+			"title": "Shredder",
+			"description": "Reach a x8 combo.",
+			"badge": "x8",
 		},
 	}
 	return game

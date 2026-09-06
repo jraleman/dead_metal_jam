@@ -1,9 +1,9 @@
 extends Control
 
 ## Dead Metal Jam's opening: an amp wakes up, the title lands on a power chord,
-## and three Rust Drones walk out of the dark and are answered one note each.
+## and three Rusty Clankies walk out of the dark and are answered one note each.
 ##
-## The drones are the game's own [RustDrone] actors, not a picture of them, so
+## The drones are the game's own [RustyClanky] actors, not a picture of them, so
 ## this scene cannot drift away from what the game actually looks like — and
 ## the opening teaches the verb before the menu ever appears.
 ##
@@ -18,6 +18,20 @@ extends Control
 const MANIFEST := preload("res://games/dead_metal_jam/game.gd")
 
 @export_file("*.tscn") var next_scene := "res://scenes/menus/main_menu.tscn"
+
+## The opening's backing track, under the whole slideshow.
+##
+## An `@export` because that is where the framework's own `scenes/boot/intro.gd`
+## and `main_menu.gd` keep theirs, so anyone looking for a scene's music finds
+## it in the same place — but it carries its own default, so the scene file does
+## not have to remember. The stream is imported with `loop = false`: the opening
+## is nine seconds and the bed is twenty, so it is a bed that gets faded, never
+## a loop that comes round. The bed is a trimmed cut of a four-minute take —
+## twenty seconds is all this scene can ever reach, and the master is not worth
+## shipping eleven times over for the eleven seconds nobody hears.
+@export var music: AudioStream = preload(
+	"res://games/dead_metal_jam/assets/intro-bg.ogg"
+)
 
 ## Narration, shown in order. Each line replaces the one before it.
 @export var cards: Array[String] = [
@@ -57,7 +71,7 @@ const RING := Color("ffd34e")
 @onready var _hint: Label = %Hint
 @onready var _progress: ColorRect = %ProgressFill
 
-var _actors: Array[RustDrone] = []
+var _actors: Array[RustyClanky] = []
 var _rings: Array[Dictionary] = []
 var _cues: Array[Dictionary] = []
 var _chord: AudioStreamWAV
@@ -114,6 +128,17 @@ func _ready() -> void:
 	_build_cues()
 	_pulse_hint()
 	_start_progress()
+	_start_music()
+
+
+## The bed starts with the scene rather than on the title cue, so the amp hum
+## at 0.15 s already has something to sit in. It fades in over the hum instead
+## of arriving with it, which is why the power chord at 1.2 s still reads as the
+## loudest thing in the opening.
+func _start_music() -> void:
+	if music == null:
+		return
+	AudioManager.play_music(music, 1.1)
 
 
 func _process(delta: float) -> void:
@@ -225,7 +250,7 @@ func _cue_tagline() -> void:
 
 func _spawn_drones() -> void:
 	for lane in DRONE_NOTES.size():
-		var drone := RustDrone.new()
+		var drone := RustyClanky.new()
 		drone.set_reduced_motion(_reduced_motion)
 		drone.configure(lane, DRONE_NOTES[lane], DRONE_APPROACH, DRONE_WINDUP)
 		_drones.add_child(drone)
@@ -281,7 +306,7 @@ func _draw_stage() -> void:
 
 	for edge in lanes + 1:
 		var slot := float(edge) - float(lanes) * 0.5
-		# 0.22 is RustDrone.HORIZON_LANE_SPREAD: lanes converge with distance.
+		# 0.22 is RustyClanky.HORIZON_LANE_SPREAD: lanes converge with distance.
 		var from := Vector2(centre + slot * lane_width * 0.22, scaled.position.y)
 		var to := Vector2(centre + slot * lane_width, scaled.end.y)
 		_stage.draw_line(from, to, Color(HORIZON, 0.55), 2.0, true)
@@ -398,4 +423,9 @@ func _finish() -> void:
 	for tween in [_card_tween, _title_tween, _flash_tween, _progress_tween, _hint_tween]:
 		if tween and tween.is_valid():
 			tween.kill()
+	# The menu's own music is optional (`main_menu.gd` only plays one if the
+	# scene sets it), so the opening has to clear its own bed or it would run
+	# on underneath the menu. A menu that *does* have music crossfades over
+	# this fade rather than waiting for it.
+	AudioManager.stop_music(0.5)
 	Router.goto(next_scene)

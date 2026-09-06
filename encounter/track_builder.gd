@@ -34,6 +34,16 @@ const DRONES_PER_WAVE := 1
 ## Never ask for more than this many drones in one wave during MVP.
 const MAX_WAVE_DRONES := 6
 
+## The wave the ramp starts asking for phrases rather than single notes, as a
+## zero-based index — so the first two waves are the core verb and nothing
+## else. An enemy that demands reading ahead is not the thing to meet before
+## the one that demands one note (§8.2).
+const PHRASE_FROM_WAVE := 2
+
+## Notes in a practice phrase. Two, never three — the ramp is teaching that
+## phrases exist, and the chart is where they get long.
+const PHRASE_NOTES := 2
+
 
 ## Builds `wave_count` waves from `note_pool`.
 ##
@@ -68,6 +78,9 @@ static func _build_wave(
 	var approach := maxf(
 		APPROACH_SECONDS - float(wave_index) * 0.2, MIN_APPROACH_SECONDS
 	)
+	# One phrase per wave once the ramp has taught the core verb, and always
+	# the last bot in the wave so the player meets it having already scored.
+	var phrase_slot := count - 1 if wave_index >= PHRASE_FROM_WAVE else -1
 
 	var drones: Array = []
 	var previous_note := -1
@@ -78,15 +91,37 @@ static func _build_wave(
 		# on the beat grid spaces the *arrivals* on it too — which is the thing
 		# the player is actually playing to. Two beats apart leaves room to
 		# hear the note and find it on the instrument.
-		drones.append({
+		var plan := {
 			"lane": rng.randi_range(0, lane_count - 1),
 			"note": note,
 			"at": float(slot) * BEAT_SECONDS * 2.0,
 			"approach": approach,
 			"windup": WINDUP_SECONDS,
-		})
+			"enemy": EncounterDirector.ENEMY_RUSTY_CLANKY,
+		}
+		if slot == phrase_slot and note_pool.size() > 1:
+			var phrase: Array[int] = [note]
+			for _step in range(PHRASE_NOTES - 1):
+				var next_note := _pick_note(note_pool, previous_note, rng)
+				previous_note = next_note
+				phrase.append(next_note)
+			plan["enemy"] = EncounterDirector.ENEMY_PLATED_KNUCKLE
+			plan["notes"] = phrase
+			# The plan carries the real wind-up rather than letting the bot
+			# widen it at spawn, because the round length is read from the plan
+			# (§2) and a wind-up that only exists at runtime would make the
+			# round timer lie.
+			plan["windup"] = maxf(
+				WINDUP_SECONDS, PlatedKnuckle.windup_for(phrase.size())
+			)
+		drones.append(plan)
 
-	return {"drones": drones}
+	return {
+		"section": "",
+		"archetype": "practice",
+		"advance": EncounterDirector.RAIL_ADVANCE_SECONDS,
+		"drones": drones,
+	}
 
 
 ## Avoids repeating the previous note, so a hit always visibly changes what the
@@ -111,10 +146,17 @@ static func _pick_note(
 ## than a hardcoded number of seconds. It is a worst case on purpose — killing
 ## drones ends waves early, so the round timer stays a backstop and TRACK
 ## CLEARED is the normal way to finish.
+##
+## Shared with the chart compiler ([method JamChart.duration]), so a song and a
+## practice ramp are measured by the same rule.
 static func duration(track: Array) -> float:
 	var total := 0.0
 	for wave: Dictionary in track:
-		total += EncounterDirector.RAIL_ADVANCE_SECONDS
+		# A chart's archetype may lengthen or shorten the rail in front of a
+		# section, so the advance is read from the wave rather than assumed.
+		total += float(
+			wave.get("advance", EncounterDirector.RAIL_ADVANCE_SECONDS)
+		)
 		var longest := 0.0
 		var drones: Variant = wave.get("drones", [])
 		if not (drones is Array):
