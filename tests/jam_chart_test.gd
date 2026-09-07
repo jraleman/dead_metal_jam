@@ -277,15 +277,15 @@ func _test_named_lane_is_kept_and_clamped() -> void:
 ## has to be written into the plan and not widened later by the bot.
 func _test_phrase_is_compiled_with_a_playable_windup() -> void:
 	var beat := _beat(0.0, 40)
-	beat.notes = [40, 45, 50]
+	beat.notes = [40, 45]
 	beat.enemy = "plated_knuckle"
 	var chart := _chart([_section("BRIDGE", "press", [beat])])
 	var plan: Dictionary = chart.to_track()[0]["drones"][0]
 
 	_check(str(plan["enemy"]) == "plated_knuckle", "The enemy key reaches the plan.")
 	_check(
-		(plan["notes"] as Array) == [40, 45, 50],
-		"So does the phrase, in order."
+		(plan["notes"] as Array) == [40, 45, 40],
+		"A short phrase is cycled in order until all three plates are filled."
 	)
 	_check(int(plan["note"]) == 40, "The called note is the phrase's first note.")
 	_check(
@@ -294,12 +294,21 @@ func _test_phrase_is_compiled_with_a_playable_windup() -> void:
 		% float(plan["windup"])
 	)
 
+	var long := _beat(0.0, 48)
+	long.notes = [48, 52, 55, 59]
+	long.enemy = "plated_knuckle"
+	var trimmed: Dictionary = _chart([_section("Y", "march", [long])]).to_track()[0]["drones"][0]
+	_check(
+		(trimmed["notes"] as Array) == [48, 52, 55],
+		"A long phrase keeps only its first three notes."
+	)
+
 	var bare := _beat(0.0, 55)
 	bare.enemy = "plated_knuckle"
 	var one: Dictionary = _chart([_section("X", "march", [bare])]).to_track()[0]["drones"][0]
 	_check(
-		(one["notes"] as Array) == [55],
-		"A phrase-less phrase enemy falls back to its single note."
+		(one["notes"] as Array) == [55, 55, 55],
+		"A bare plated beat repeats its authored note across all three plates."
 	)
 
 
@@ -466,9 +475,9 @@ func _test_shipped_chart_is_playable(path: String) -> void:
 			plated += 1
 			var phrase: Array = plan["notes"]
 			_check(
-				phrase.size() >= PlatedKnuckle.MIN_PLATES
-				and phrase.size() <= PlatedKnuckle.MAX_PLATES,
-				"A phrase in %s is between two and three notes." % song
+				phrase.size() == PlatedKnuckle.MIN_PLATES
+				and phrase.size() == PlatedKnuckle.MAX_PLATES,
+				"A phrase in %s is the fixed three-note requirement." % song
 			)
 			_check(
 				float(plan["windup"]) >= PlatedKnuckle.windup_for(phrase.size()),
@@ -636,7 +645,7 @@ func _test_track_builder_stages_a_plated_knuckle() -> void:
 			continue
 		plated += 1
 		var phrase: Array = last["notes"]
-		_check(phrase.size() >= 2, "A phrase is at least two notes.")
+		_check(phrase.size() == 3, "A plated practice phrase is exactly three notes.")
 		_check(
 			int(last["note"]) == int(phrase[0]),
 			"The called note is the first note of the phrase."
@@ -646,6 +655,16 @@ func _test_track_builder_stages_a_plated_knuckle() -> void:
 			"The plan carries a wind-up the phrase can actually be played in."
 		)
 	_check(plated > 0, "A four-wave ramp introduces the second enemy at least once.")
+
+	var tight_rng := RandomNumberGenerator.new()
+	tight_rng.seed = 11
+	var two_note_track := DmjTrackBuilder.build([40, 45], 4, tight_rng)
+	var compact: Dictionary = two_note_track[3]["drones"][-1]
+	_check(
+		(compact["notes"] as Array).size() == 3
+		and int(compact["notes"][0]) == int(compact["notes"][2]),
+		"A two-note pool still authors a full three-hit plated phrase."
+	)
 
 	_check(
 		DmjTrackBuilder.duration(track) > 0.0,

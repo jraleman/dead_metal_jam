@@ -40,9 +40,10 @@ const MAX_WAVE_DRONES := 6
 ## the one that demands one note (§8.2).
 const PHRASE_FROM_WAVE := 2
 
-## Notes in a practice phrase. Two, never three — the ramp is teaching that
-## phrases exist, and the chart is where they get long.
-const PHRASE_NOTES := 2
+## Notes in a practice phrase. The plated enemy is always three hits, even in
+## practice, so the builder authors to the same fixed requirement the runtime
+## enforces.
+const PHRASE_NOTES := PlatedKnuckle.REQUIRED_PLATES
 
 
 ## Builds `wave_count` waves from `note_pool`.
@@ -105,6 +106,7 @@ static func _build_wave(
 				var next_note := _pick_note(note_pool, previous_note, rng)
 				previous_note = next_note
 				phrase.append(next_note)
+			phrase = PlatedKnuckle.normalize_sequence(phrase, note)
 			plan["enemy"] = EncounterDirector.ENEMY_PLATED_KNUCKLE
 			plan["notes"] = phrase
 			# The plan carries the real wind-up rather than letting the bot

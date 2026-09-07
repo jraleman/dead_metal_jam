@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="steel" x2=".2" y2="1">
+      <stop stop-color="#c0c9c9"/><stop offset=".12" stop-color="#68777a"/>
+      <stop offset=".5" stop-color="#95a0a0"/><stop offset="1" stop-color="#46585e"/>
+    </linearGradient>
+    <pattern id="brush" width="128" height="6" patternUnits="userSpaceOnUse">
+      <path d="M0 1h81m12 0h35M12 4h69m9 0h28" stroke="#e8eded" stroke-opacity=".1"/>
+    </pattern>
+  </defs>
+  <path fill="#142127" d="M0 0h256v256H0z"/>
+  <path d="M10 4h236l6 6v236l-6 6H10l-6-6V10Z" fill="url(#steel)"/>
+  <path d="M11 6h234l5 5v233" fill="none" stroke="#e0e6e1" stroke-width="2"/>
+  <path d="M6 12v233l5 5h233" fill="none" stroke="#25363d" stroke-width="3"/>
+  <path d="M25 25h206v206H25z" fill="url(#brush)" stroke="#293a40"/>
+  <g fill="#283a40" stroke="#d0d5ce" stroke-width="1.5">
+    <circle cx="16" cy="16" r="5"/><circle cx="240" cy="16" r="5"/>
+    <circle cx="16" cy="240" r="5"/><circle cx="240" cy="240" r="5"/>
+  </g>
+  <path d="m13 19 6-6m218 6 6-6M13 243l6-6m218 6 6-6" stroke="#91a1a4" stroke-width="2"/>
+  <path d="m29 17 42-2m101 1 17 2M48 240l31-2m85 3 36-1M239 44l-1 34" stroke="#e6e2d2" stroke-opacity=".25"/>
+</svg>

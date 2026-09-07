@@ -60,6 +60,7 @@ func _test_modes_are_only_flags() -> void:
 
 	director.apply_mode(EncounterDirector.Mode.JAM)
 	_check(director.pitch_matters, "Jam cares which note was played.")
+	_check(director.arcade_shots, "Jam accepts shots throughout the attack warning.")
 	_check(not director.stop_time, "Jam does not stop time.")
 	_check(director.reports_damage, "Jam can cost a life.")
 	_check(
@@ -70,6 +71,7 @@ func _test_modes_are_only_flags() -> void:
 
 	director.apply_mode(EncounterDirector.Mode.RHYTHM)
 	_check(not director.pitch_matters, "Rhythm ignores which note was played.")
+	_check(not director.arcade_shots, "Rhythm retains its strict timing gate.")
 	_check(not director.stop_time, "Rhythm does not stop time.")
 	_check(director.reports_damage, "Rhythm can cost a life.")
 	_check(
@@ -79,6 +81,7 @@ func _test_modes_are_only_flags() -> void:
 
 	director.apply_mode(EncounterDirector.Mode.DEMO)
 	_check(director.pitch_matters, "Demo still cares which note was played.")
+	_check(not director.arcade_shots, "Demo retains its guided beat timing.")
 	_check(director.stop_time, "Demo stops time.")
 	_check(not director.reports_damage, "Demo never costs a life.")
 	_check(
@@ -93,6 +96,7 @@ func _test_modes_are_only_flags() -> void:
 	director.apply_mode(EncounterDirector.Mode.JAM)
 	_check(
 		director.pitch_matters
+		and director.arcade_shots
 		and not director.stop_time
 		and director.reports_damage
 		and is_equal_approx(director.mode_window_scale, 1.0),
@@ -418,17 +422,17 @@ func _test_demo_keeps_the_rail_moving_between_waves() -> void:
 ## Demo is forgiving *before* the beat as well as at it — a player who rushes
 ## should be told they were early, not that they missed.
 func _test_demo_widens_the_window() -> void:
-	var early := 0.7  # 300 ms before the beat: outside Jam's edge window.
+	var early := 0.7  # 300 ms before the beat: outside the strict edge window.
 
-	var jam := _mode_director(
-		EncounterDirector.Mode.JAM, [_drone_plan(1, 40, 0.0, 1.0)]
+	var rhythm := _mode_director(
+		EncounterDirector.Mode.RHYTHM, [_drone_plan(1, 40, 0.0, 1.0)]
 	)
-	_run(jam, early)
+	_run(rhythm, early)
 	_check(
-		_kind(jam.resolve_note(4, 0)) == EncounterDirector.Judgement.NOISE,
-		"300 ms early is outside every Jam window."
+		_kind(rhythm.resolve_note(4, 0)) == EncounterDirector.Judgement.NOISE,
+		"300 ms early is outside the Rhythm window."
 	)
-	jam.free()
+	rhythm.free()
 
 	var demo := _mode_director(
 		EncounterDirector.Mode.DEMO, [_drone_plan(1, 40, 0.0, 1.0)]
@@ -472,7 +476,20 @@ func _test_demo_paces_a_phrase_plate_by_plate() -> void:
 		"Which the second note answers."
 	)
 	_run(director, STEP)
-	_check(director.live_drones().is_empty(), "The robot is down.")
+	_check(
+		not director.live_drones().is_empty(),
+		"Two plates broken still leave the fixed third hit to play."
+	)
+	_check(not director.is_time_stopped(), "The third beat is handed back to the clock too.")
+
+	_run(director, PlatedKnuckle.PLATE_SECONDS + STEP * 2.0)
+	_check(director.is_time_stopped(), "And Demo stops once more at the cycled third plate.")
+	_check(
+		_kind(director.resolve_note(4, 0)) == EncounterDirector.Judgement.HIT,
+		"Which cycles back to the first note."
+	)
+	_run(director, STEP)
+	_check(director.live_drones().is_empty(), "The robot is down on the third hit.")
 	_check(not director.is_time_stopped(), "And nothing is holding the clock.")
 	director.free()
 

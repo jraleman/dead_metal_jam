@@ -59,7 +59,7 @@ static func power_chord(root_note := ROOT_NOTE, seconds := CHORD_SECONDS) -> Aud
 
 		samples[i] = _saturate(value * 4.2) * _pluck_envelope(t, seconds, 0.006, 1.5)
 
-	return _stream(_normalized(samples, 0.86))
+	return render_samples(samples, 0.86)
 
 
 ## The amp waking up: mains hum with a little hiss, fading in from nothing.
@@ -85,7 +85,7 @@ static func amp_hum(seconds := HUM_SECONDS) -> AudioStreamWAV:
 		var envelope := minf(progress * 3.0, 1.0) * (1.0 - pow(progress, 4.0))
 		samples[i] = value * envelope
 
-	return _stream(_normalized(samples, 0.34))
+	return render_samples(samples, 0.34)
 
 
 ## One note landing on a drone: a clean pluck, so it reads as the player's
@@ -105,12 +105,17 @@ static func note_ping(note: int, seconds := PING_SECONDS) -> AudioStreamWAV:
 		)
 		samples[i] = value * _pluck_envelope(t, seconds, 0.003, 6.5)
 
-	return _stream(_normalized(samples, 0.7))
+	return render_samples(samples, 0.7)
 
 
 ## Equal-tempered frequency of a MIDI note, A4 = 440 Hz.
 static func frequency(note: int) -> float:
 	return 440.0 * pow(2.0, (float(note) - 69.0) / 12.0)
+
+
+## Shared PCM rendering for the intro and the game's short menu cues.
+static func render_samples(samples: PackedFloat32Array, peak: float) -> AudioStreamWAV:
+	return _stream(_normalized(samples, peak))
 
 
 ## Fast attack, exponential decay, and a short fade at the very end so the

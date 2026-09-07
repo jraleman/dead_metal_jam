@@ -42,16 +42,18 @@ var _checks := 0
 func _initialize() -> void:
 	_hud = load(GAMEPLAY_PATH)
 	_test_corridor_leaves_headroom()
-	_test_drone_depth_grows()
+	_test_drones_hold_firing_positions()
 	_test_drone_fades_into_the_distance()
-	_test_bots_walk_the_corridor_not_the_frame()
+	_test_bots_use_the_arena_floor()
 	_test_head_bob_moves_and_settles()
 	_test_reduced_motion_holds_the_head_still()
 	_test_stopped_time_stops_the_head()
 	_test_banner_counts_waves()
 	_test_advance_copy_never_names_a_section()
 	_test_last_advance_gets_its_own_line()
-	_finish()
+	_test_combo_charge_boundaries()
+	_test_rail_effects_can_be_cleared()
+	_test_console_scene.call_deferred()
 
 
 # --------------------------------------------------------------------------
@@ -83,9 +85,8 @@ func _test_corridor_leaves_headroom() -> void:
 		% (100.0 * corridor.size.y / FIELD.size.y)
 	)
 
-	# Degenerate fields are not hypothetical: `_playfield_bounds()` floors the
-	# play area at 80 px, and a zero-height corridor would divide by zero in
-	# every projection helper that reads it.
+	# A resize can momentarily collapse the available field. A zero-height
+	# corridor would divide by zero in every projection helper that reads it.
 	var tiny := JamBot.corridor_rect(Rect2(Vector2.ZERO, Vector2(10.0, 0.0)))
 	_check(tiny.size.y > 0.0, "A collapsed field still yields a usable corridor.")
 
@@ -94,23 +95,20 @@ func _test_corridor_leaves_headroom() -> void:
 # Faking depth
 
 
-func _test_drone_depth_grows() -> void:
+func _test_drones_hold_firing_positions() -> void:
 	var drone := RustyClanky.new()
 	drone.configure(0, 40, 2.0, 1.0)
-	drone.advance(0.0, FIELD, EncounterDirector.LANE_COUNT)
-	var near_horizon := drone.scale.x
-	var horizon_y := drone.position.y
-	var horizon_x := drone.position.x
-
-	_advance_drone(drone, 2.0)
-	_check(drone.scale.x > near_horizon, "A drone grows as it approaches.")
-	_check(drone.position.y > horizon_y, "It walks down the screen.")
+	_advance_drone(drone, JamBot.ENTRY_SECONDS + STEP)
+	var initial_position := drone.position
+	var initial_scale := drone.scale
+	_advance_drone(drone, 1.9)
+	_check(drone.scale.is_equal_approx(initial_scale), "Aiming does not grow a drone toward the camera.")
+	_check(drone.position.is_equal_approx(initial_position), "A drone holds its firing position.")
 	_check(
-		absf(drone.position.x - FIELD.get_center().x)
-		> absf(horizon_x - FIELD.get_center().x),
-		"Lanes spread apart as they near the camera."
+		drone.position.is_equal_approx(DmjArenaLayout.position(FIELD, 0, 3, 0)),
+		"Enemy placement agrees with the scenery's firing position."
 	)
-	_check(drone.z_index > 0, "Nearer drones draw over further ones.")
+	_check(drone.z_index > 0, "Depth still controls draw order.")
 	drone.free()
 
 
@@ -123,6 +121,7 @@ func _test_drone_depth_grows() -> void:
 func _test_drone_fades_into_the_distance() -> void:
 	var drone := RustyClanky.new()
 	drone.configure(0, 40, 2.0, 1.0)
+	drone.firing_slot = 1
 	drone.advance(0.0, FIELD, EncounterDirector.LANE_COUNT)
 	var far := drone.modulate
 
@@ -138,15 +137,18 @@ func _test_drone_fades_into_the_distance() -> void:
 		+ "what the death and muzzle fades use."
 	)
 
-	_advance_drone(drone, 2.0)
+	var front := RustyClanky.new()
+	front.configure(0, 40, 2.0, 1.0)
+	front.advance(0.0, FIELD, EncounterDirector.LANE_COUNT)
 	_check(
-		drone.modulate.v > far.v,
-		"Walking out of the dust brightens it."
+		front.modulate.v > far.v,
+		"The closer firing position is brighter."
 	)
 	_check(
-		drone.modulate.is_equal_approx(Color.WHITE),
-		"And a bot at the strike line carries no tint at all."
+		front.scale.x > drone.scale.x,
+		"Back-row occupants are smaller rather than overlapping the front row."
 	)
+	front.free()
 	drone.free()
 
 
@@ -160,7 +162,7 @@ func _test_drone_fades_into_the_distance() -> void:
 ##
 ## Checked against the shared inset rather than a number, so this test tracks
 ## the constant instead of having to be retuned alongside it.
-func _test_bots_walk_the_corridor_not_the_frame() -> void:
+func _test_bots_use_the_arena_floor() -> void:
 	var director := _opened_director([_drone_plan(1, 45, 0.0, 3.0)])
 	_run(director, 0.2)
 	var drones := director.live_drones()
@@ -178,9 +180,11 @@ func _test_bots_walk_the_corridor_not_the_frame() -> void:
 	)
 
 	_run(director, 3.0)
+	var anchor := DmjArenaLayout.position(corridor, 1, 3, 0)
 	_check(
-		drones[0].position.y >= corridor.end.y - 1.0,
-		"And still arrives at the strike line."
+		drones[0].position.distance_to(anchor) < EncounterDirector.BOB_ADVANCE * 2.0
+		and drones[0].position.y < corridor.end.y - 24.0,
+		"The drone remains in its firing bay instead of reaching the player's feet."
 	)
 	director.free()
 
@@ -360,6 +364,274 @@ func _test_last_advance_gets_its_own_line() -> void:
 			not str(_hud._advance_line(index, 13)).is_empty(),
 			"A long track never runs out of things to say."
 		)
+
+
+# --------------------------------------------------------------------------
+# The instrument console
+
+
+func _test_combo_charge_boundaries() -> void:
+	var cases := {
+		0: Vector2i(0, 5), 4: Vector2i(0, 5),
+		5: Vector2i(5, 15), 14: Vector2i(5, 15),
+		15: Vector2i(15, 30), 29: Vector2i(15, 30),
+		30: Vector2i(30, 30), 80: Vector2i(30, 30),
+	}
+	for streak: int in cases:
+		_check(
+			DmjPerformanceHud.combo_band(streak) == cases[streak],
+			"Combo charge must use the scoring ladder at streak %d." % streak
+		)
+
+
+func _test_rail_effects_can_be_cleared() -> void:
+	var rail := DmjRail.new()
+	var resting := rail._light_at(1.0)
+	rail.flash(1.0)
+	_check(rail._light_at(1.0) > resting, "A note lights the near floor.")
+	rail.flash(0.0)
+	_check(
+		is_equal_approx(rail._light_at(1.0), resting),
+		"Disabling effects clears an in-flight flare."
+	)
+	rail.flash(1.0)
+	rail.set_reduced_motion(true)
+	rail.flash(1.0)
+	_check(
+		is_equal_approx(rail._light_at(1.0), resting),
+		"Reduced motion keeps the floor at its resting brightness."
+	)
+	rail.free()
+
+
+func _test_console_scene() -> void:
+	var packed := load("res://games/dead_metal_jam/gameplay.tscn") as PackedScene
+	if packed == null:
+		_check(false, "The console's gameplay scene must load.")
+		_finish()
+		return
+	var settings := get_root().get_node("Settings")
+	var values: Dictionary = settings.get("_values")
+	var saved := values.duplicate(true)
+	values[DmjOptions.NOTE_SOURCE_KEY] = DmjOptions.SOURCE_KEYBOARD
+	values[DmjOptions.MODE_KEY] = DmjOptions.MODE_JAM
+	values[DmjOptions.TRACK_KEY] = DmjOptions.TRACK_SONG_02
+	values["accessibility/audio_captions"] = false
+	GameCatalog.select("dead_metal_jam")
+	get_root().get_node("GameSession").call("configure_single_player")
+
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(1920, 1080)
+	get_root().add_child(viewport)
+	var game := packed.instantiate()
+	viewport.add_child(game)
+	await process_frame
+	await process_frame
+	await process_frame
+	await _check_room_is_fitted_while_the_round_waits(game, viewport)
+	game.set_process(false)
+	(game.get_node("%RoundTimer") as Timer).stop()
+	var console: DmjPerformanceHud = game.get_node("%DmjPrompt")
+	console.set_process(false)
+	_check_console_feedback(game, console)
+	await _check_console_layouts(game, console, viewport)
+
+	game.set("_round_active", false)
+	game.call("_finish_round")
+	get_root().get_node("AudioManager").call("stop_music", 0.0)
+	viewport.queue_free()
+	await process_frame
+	await process_frame
+	values.clear()
+	values.merge(saved, true)
+	_finish.call_deferred()
+
+
+## A round is on screen before it is advancing: behind the router's fade, and
+## for the two seconds the microphone spends measuring the room. The corridor
+## is drawn from the play area, and the play area used to be re-read only by
+## the advance, so for all of that the room stayed at the placeholder size
+## [EncounterDirector] is built with — a small corridor in the corner of the
+## screen that snapped to full size the moment the soundcheck ended.
+func _check_room_is_fitted_while_the_round_waits(
+	game: Node, viewport: SubViewport
+) -> void:
+	var director: EncounterDirector = game.get("_director")
+	var rail: DmjRail = director.get_node("Rail")
+	var was_active := bool(game.get("_round_active"))
+	game.set("_round_active", false)
+	for dimensions: Vector2i in [Vector2i(1920, 1080), Vector2i(1280, 720)]:
+		viewport.size = dimensions
+		for _frame in range(3):
+			await process_frame
+		var play_area: Rect2 = game.call("_playfield_bounds")
+		var room: Rect2 = rail.get("_field")
+		_check(
+			room.is_equal_approx(play_area),
+			"A round on screen but not yet advancing still fills the %s play "
+			% dimensions + "area: expected %s, got %s." % [play_area, room]
+		)
+	game.set("_round_active", was_active)
+
+
+func _check_console_feedback(game: Node, console: DmjPerformanceHud) -> void:
+	var router: NoteRouter = game.get("_router")
+	var signal_meter: DmjSegmentedMeter = game.get_node("%DmjSignalMeter")
+	var wave_meter: DmjSegmentedMeter = game.get_node("%DmjWaveMeter")
+	var combo_meter: DmjSegmentedMeter = game.get_node("%DmjComboMeter")
+	var feedback: Label = game.get_node("%DmjFeedback")
+	var detail: Label = game.get_node("%DmjFeedbackDetail")
+	var combo_hint: Label = game.get_node("%DmjComboHint")
+
+	router.input_level_changed.emit(0.1)
+	_check(is_equal_approx(signal_meter.value, 0.4), "The router drives the live input meter.")
+	console._process(1.0)
+	_check(is_zero_approx(signal_meter.value), "The signal decays to silence, not fake activity.")
+	console.set_calibrating(true)
+	_check(feedback.text == "KEEP IT QUIET", "Soundcheck must not invite the player to make noise.")
+	console.set_calibrating(false)
+
+	var director: EncounterDirector = game.get("_director")
+	director.set_track([{"drones": [
+		_drone_plan(1, 40, 0.0, 1.0), _drone_plan(0, 45, 0.0, 4.0),
+	]}])
+	director.begin()
+	_run(director, EncounterDirector.RAIL_ADVANCE_SECONDS + 1.0)
+	router.note_started.emit(NoteEvent.make(40, NoteEvent.Source.KEYBOARD, 0.8))
+	_check(feedback.text == "PERFECT", "A real scored note reaches the console.")
+	_check(detail.text.begins_with("+"), "The judgement includes its awarded points.")
+	_check(is_equal_approx(signal_meter.value, 0.8), "Keyboard velocity also drives the meter.")
+	_check(combo_hint.text == "4 NOTES TO x2", "The next multiplier counts actual scoring notes.")
+	router.note_started.emit(NoteEvent.make(43, NoteEvent.Source.KEYBOARD))
+	_check(feedback.text == "WRONG NOTE", "A wrong note is identified in text, not just colour.")
+	_check(is_zero_approx(combo_meter.value), "A wrong note also clears combo charge.")
+
+	director.apply_mode(EncounterDirector.Mode.RHYTHM)
+	game.call("_update_target_readout")
+	_check(
+		(game.get_node("%DmjTarget") as Label).text == "ANY",
+		"The large note display still describes Rhythm's rules."
+	)
+	director.apply_mode(EncounterDirector.Mode.DEMO)
+	_run(director, 3.2)
+	game.call("_update_target_readout")
+	_check(
+		(game.get_node("%DmjPromptCaption") as Label).text == "WAITING FOR YOU",
+		"The console explains Demo's frozen beat."
+	)
+	director.halt()
+
+	console.set_wave(2, 5)
+	_check(
+		wave_meter.value == 2.0 and wave_meter.marker == 2,
+		"The third wave marks two completed waves and one current wave."
+	)
+	console.clear_wave(2)
+	_check(wave_meter.value == 3.0, "A cleared wave fills its segment.")
+	console.set_combo(30)
+	_check(combo_hint.text == "MAX MULTIPLIER", "The combo ladder has an explicit ceiling.")
+	_check(is_equal_approx(combo_meter.ratio, 1.0), "Maximum combo keeps a full meter.")
+	console.reset_performance(5)
+	_check(
+		is_zero_approx(signal_meter.value) and is_zero_approx(wave_meter.value)
+		and is_zero_approx(combo_meter.value) and wave_meter.marker == -1,
+		"A replay clears every meter and the active wave marker."
+	)
+	console.set_track(null, "DEMO")
+	_check(
+		(game.get_node("%DmjTrackTitle") as Label).text == "FREE PLAY"
+		and (game.get_node("%DmjTrackDetail") as Label).text.contains("DEMO"),
+		"Practice tracks and mode changes have honest metadata."
+	)
+
+	var rail: DmjRail = director.get_node("Rail")
+	game.call("_set_reduced_motion_enabled", true)
+	_check(bool(rail.get("_reduced_motion")), "Reduced motion reaches the live rail immediately.")
+	game.call("_set_reduced_motion_enabled", false)
+	director.flash_rail(1.0)
+	game.call("_set_intense_effects_enabled", false)
+	_check(is_zero_approx(float(rail.get("_flash"))), "Switching effects off clears the live flare.")
+
+
+func _check_console_layouts(
+	game: Node, console: DmjPerformanceHud, viewport: SubViewport
+) -> void:
+	var captions: Control = game.get_node("%AudioCaption")
+	var director: EncounterDirector = game.get("_director")
+	var values: Dictionary = get_root().get_node("Settings").get("_values")
+	var attack_bar: Range = game.get_node("%DmjAttackBar")
+	captions.set_process(false)
+	attack_bar.show()
+	for dimensions: Vector2i in [
+		Vector2i(1920, 1080), Vector2i(960, 1700),
+		Vector2i(1280, 720), Vector2i(2560, 1080), Vector2i(720, 960),
+	]:
+		viewport.size = dimensions
+		values["accessibility/audio_captions"] = false
+		captions.hide()
+		console.show()
+		for _frame in range(4):
+			await process_frame
+		var panel := console.get_global_rect()
+		var screen := Rect2(Vector2.ZERO, Vector2(dimensions))
+		_check(screen.encloses(panel), "The console fits the %s viewport." % dimensions)
+		var top: Control = game.get_node("HUD/Overlay/Margins/Layout/TopBar")
+		_check(screen.encloses(top.get_global_rect()), "The top bar fits %s." % dimensions)
+		for name in [
+			"DmjTarget", "DmjPromptCaption", "DmjHeard",
+			"DmjFeedback", "DmjFeedbackDetail", "DmjStatus", "DmjThreat",
+		]:
+			var label: Label = game.get_node("%%%s" % name)
+			_check(
+				panel.grow(0.5).encloses(label.get_global_rect()),
+				"%s stays inside the console at %s." % [name, dimensions]
+			)
+		for name in ["DmjAttackBar", "DmjNoteStrip"]:
+			var meter: Range = game.get_node("%%%s" % name)
+			_check(
+				panel.grow(0.5).encloses(meter.get_global_rect()),
+				"%s stays inside the console at %s." % [name, dimensions]
+			)
+		var bounds: Rect2 = game.call("_playfield_bounds")
+		_check(
+			bounds.end.y + DmjDroneArt.foot_clearance(director.visual_scale) <= panel.position.y + 0.5,
+			"Drone feet clear the console at %s." % dimensions
+		)
+		captions.custom_minimum_size.y = 64.0
+		values["accessibility/audio_captions"] = true
+		var reserved: Rect2 = game.call("_playfield_bounds")
+		captions.show()
+		for _frame in range(3):
+			await process_frame
+		bounds = game.call("_playfield_bounds")
+		_check(
+			bounds.end.y + DmjDroneArt.foot_clearance(director.visual_scale) <= captions.get_global_rect().position.y + 0.5,
+			"Audio captions also reserve playfield room at %s." % dimensions
+		)
+		_check(
+			is_equal_approx(bounds.end.y, reserved.end.y),
+			"Showing a caption keeps the firing floor at %s: expected %.3f, got %.3f." % [
+				dimensions, reserved.end.y, bounds.end.y,
+			]
+		)
+		captions.hide()
+		await process_frame
+		bounds = game.call("_playfield_bounds")
+		_check(
+			is_equal_approx(bounds.end.y, reserved.end.y),
+			"Hiding a caption keeps the firing floor at %s: expected %.3f, got %.3f." % [
+				dimensions, reserved.end.y, bounds.end.y,
+			]
+		)
+		for shown: bool in [false, true]:
+			attack_bar.visible = shown
+			for _frame in range(3):
+				await process_frame
+			bounds = game.call("_playfield_bounds")
+			_check(
+				is_equal_approx(bounds.end.y, reserved.end.y),
+				"Attack-bar visibility does not move the firing floor at %s." % dimensions
+			)
 
 
 # --------------------------------------------------------------------------

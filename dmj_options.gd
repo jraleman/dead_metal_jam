@@ -114,7 +114,8 @@ const TUNABLES: Array[Dictionary] = [
 		"default": DEFAULT_MODE,
 		"title": "Mode",
 		"description": (
-			"Jam is the game. Rhythm ignores which note you play and scores "
+			"Jam lets correct notes fire any time before a robot shoots, with "
+			+ "bonuses near the beat. Rhythm ignores pitch and scores "
 			+ "only your timing. Demo waits at every beat until you play it, "
 			+ "and nothing can hurt you."
 		),
@@ -131,7 +132,7 @@ const TUNABLES: Array[Dictionary] = [
 		"default": DEFAULT_TRACK,
 		"title": "Track",
 		"description": (
-			"Each song is charted: named sections, a rail advance between "
+			"Each song is charted: named sections, a new firing position between "
 			+ "them, and armoured robots that ask for a phrase. The practice "
 			+ "ramp just keeps sending waves."
 		),
@@ -160,7 +161,8 @@ const TUNABLES: Array[Dictionary] = [
 		"step": 0.05,
 		"title": "Timing leniency",
 		"description": (
-			"Widens or tightens every timing window. Stacks with the "
+			"Widens timing-bonus windows in Jam and hit windows in the practice "
+			+ "modes. Stacks with the "
 			+ "Gameplay tab's handicap."
 		),
 		"format": GameManifest.FORMAT_PERCENT,

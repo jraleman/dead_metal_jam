@@ -1,7 +1,7 @@
 extends Control
 
 ## Dead Metal Jam's opening: an amp wakes up, the title lands on a power chord,
-## and three Rusty Clankies walk out of the dark and are answered one note each.
+## and three Rusty Clankies take firing positions and are shot with musical notes.
 ##
 ## The drones are the game's own [RustyClanky] actors, not a picture of them, so
 ## this scene cannot drift away from what the game actually looks like — and
@@ -54,12 +54,7 @@ const DRONE_WINDUP := 1.6
 const DRONE_ZOOM := 1.35
 
 const TOTAL_SECONDS := 9.0
-const RING_SECONDS := 0.5
 const SHAKE_DECAY := 42.0
-
-const HORIZON := Color("2a3a45")
-const STRIKE := Color("afddea")
-const RING := Color("ffd34e")
 
 
 @onready var _stage: Control = %Stage
@@ -72,7 +67,7 @@ const RING := Color("ffd34e")
 @onready var _progress: ColorRect = %ProgressFill
 
 var _actors: Array[RustyClanky] = []
-var _rings: Array[Dictionary] = []
+var _shots: DmjShotFx
 var _cues: Array[Dictionary] = []
 var _chord: AudioStreamWAV
 var _hum: AudioStreamWAV
@@ -91,6 +86,7 @@ var _next_cue := 0
 var _finished := false
 var _reduced_motion := false
 var _intense_effects := true
+var _rail: DmjRail
 
 
 func _ready() -> void:
@@ -119,7 +115,18 @@ func _ready() -> void:
 	for note in DRONE_NOTES:
 		_pings.append(DmjIntroSound.note_ping(note + 12))
 
-	_stage.draw.connect(_draw_stage)
+	_rail = DmjRail.new()
+	_rail.name = "Rail"
+	_rail.z_index = 0
+	_rail.show_behind_parent = true
+	_rail.scale = Vector2.ONE * DRONE_ZOOM
+	_rail.set_reduced_motion(_reduced_motion)
+	_rail.set_effects_enabled(_intense_effects)
+	_stage.add_child(_rail)
+	_shots = DmjShotFx.new()
+	_shots.set_presentation_options(_reduced_motion, _intense_effects)
+	_shots.scale = Vector2.ONE * DRONE_ZOOM
+	_stage.add_child(_shots)
 	get_viewport().size_changed.connect(_refresh_layout)
 	_title.resized.connect(_center_pivot)
 	_refresh_layout()
@@ -142,11 +149,16 @@ func _start_music() -> void:
 
 
 func _process(delta: float) -> void:
+	_shots.set_field(_drone_field())
 	_elapsed += delta
 	_run_due_cues()
 	_advance_drones(delta)
-	_advance_rings(delta)
 	_advance_shake(delta)
+	_shots.position = _drones.position
+	_rail.update_rail(
+		delta, _drone_field(), DRONE_NOTES.size(), false,
+		_drones.position / DRONE_ZOOM
+	)
 	_stage.queue_redraw()
 
 
@@ -196,6 +208,8 @@ func _cue_title() -> void:
 	AudioManager.request_caption("Power chord")
 	_add_shake(9.0)
 	_flash_screen(0.22)
+	if _intense_effects and not _reduced_motion:
+		_rail.flash(1.0)
 
 	if _title_tween and _title_tween.is_valid():
 		_title_tween.kill()
@@ -231,9 +245,11 @@ func _cue_answer(index: int) -> void:
 	AudioManager.request_caption(
 		"%s lands — drone down" % PitchDetector.note_name(DRONE_NOTES[index])
 	)
-	_rings.append({"center": drone.position * DRONE_ZOOM, "age": 0.0})
+	_shots.player_shot(drone.aim_point(), true, DRONE_NOTES[index], drone.scale.x)
 	_add_shake(5.0)
 	_flash_screen(0.1)
+	if _intense_effects and not _reduced_motion:
+		_rail.flash(0.75)
 	_target_next(index + 1)
 
 
@@ -252,6 +268,7 @@ func _spawn_drones() -> void:
 	for lane in DRONE_NOTES.size():
 		var drone := RustyClanky.new()
 		drone.set_reduced_motion(_reduced_motion)
+		drone.set_effects_enabled(_intense_effects)
 		drone.configure(lane, DRONE_NOTES[lane], DRONE_APPROACH, DRONE_WINDUP)
 		_drones.add_child(drone)
 		_actors.append(drone)
@@ -268,12 +285,14 @@ func _target_next(index: int) -> void:
 
 func _advance_drones(delta: float) -> void:
 	var field := _drone_field()
+	var floor_rect := JamBot.corridor_rect(field)
 	for drone in _actors:
 		if not is_instance_valid(drone):
 			continue
+		drone.visual_scale = DmjDroneArt.fit_scale(field.size.y)
 		# The return value says the drone fired; nothing here lives long
 		# enough to, and the opening must never show the player losing.
-		drone.advance(delta, field, DRONE_NOTES.size())
+		drone.advance(delta, floor_rect, DRONE_NOTES.size())
 
 
 ## The lanes, in the drones' own space — the container is scaled, so the rect
@@ -283,6 +302,9 @@ func _drone_field() -> Rect2:
 	var portrait := Responsive.is_portrait(size)
 	var width := minf(size.x * (0.86 if portrait else 0.72), 1180.0)
 	var top := size.y * (0.50 if portrait else 0.46)
+	top = maxf(
+		top, _card.get_global_rect().end.y + DmjRail.BACKDROP_PADDING * DRONE_ZOOM + 16.0
+	)
 	var bottom := size.y * 0.88
 	var rect := Rect2(
 		Vector2((size.x - width) * 0.5, top), Vector2(width, bottom - top)
@@ -293,50 +315,6 @@ func _drone_field() -> Rect2:
 # --------------------------------------------------------------------------
 # Stage, effects and layout
 # --------------------------------------------------------------------------
-
-
-## The lane guides and the strike line: the same depth cue the game draws, so
-## the opening reads as the game rather than as a separate animation.
-func _draw_stage() -> void:
-	var field := _drone_field()
-	var scaled := Rect2(field.position * DRONE_ZOOM, field.size * DRONE_ZOOM)
-	var lanes := DRONE_NOTES.size()
-	var lane_width := scaled.size.x / float(lanes)
-	var centre := scaled.get_center().x
-
-	for edge in lanes + 1:
-		var slot := float(edge) - float(lanes) * 0.5
-		# 0.22 is RustyClanky.HORIZON_LANE_SPREAD: lanes converge with distance.
-		var from := Vector2(centre + slot * lane_width * 0.22, scaled.position.y)
-		var to := Vector2(centre + slot * lane_width, scaled.end.y)
-		_stage.draw_line(from, to, Color(HORIZON, 0.55), 2.0, true)
-
-	_stage.draw_line(
-		Vector2(scaled.position.x, scaled.end.y),
-		Vector2(scaled.end.x, scaled.end.y),
-		Color(STRIKE, 0.5),
-		3.0,
-		true
-	)
-
-	for ring: Dictionary in _rings:
-		var progress: float = clampf(float(ring["age"]) / RING_SECONDS, 0.0, 1.0)
-		var alpha := (1.0 - progress) * 0.6
-		# Under reduced motion the ring only fades: it still marks where the
-		# note landed, without a decorative expansion.
-		var radius := 54.0 if _reduced_motion else lerpf(20.0, 168.0, progress)
-		_stage.draw_arc(
-			ring["center"], radius, 0.0, TAU, 48, Color(RING, alpha), 3.0, true
-		)
-
-
-func _advance_rings(delta: float) -> void:
-	var alive: Array[Dictionary] = []
-	for ring: Dictionary in _rings:
-		ring["age"] = float(ring["age"]) + delta
-		if float(ring["age"]) < RING_SECONDS:
-			alive.append(ring)
-	_rings = alive
 
 
 func _add_shake(amount: float) -> void:

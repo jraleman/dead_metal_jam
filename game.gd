@@ -22,6 +22,7 @@ static func manifest() -> GameManifest:
 	# apart and no way for a CPU to hold an instrument.
 	game.supports_multiplayer = false
 	game.supports_cpu_opponent = false
+	game.default_lives_mode = true
 	# The player acts by playing a note rather than by pressing a bound key, so
 	# the target-key control cards would describe controls that do not exist.
 	# This style is the one that renders manifest copy instead.
@@ -35,8 +36,8 @@ static func manifest() -> GameManifest:
 		"mode_select_intro": "Tune up and pick your round.",
 		"mode_select_hint": "Bring an instrument — the game listens to your microphone.",
 		"single_player_description": (
-			"Play the note each robot calls out. Hit it and the robot goes down; "
-			+ "miss it and it keeps coming."
+			"Match the robot's note and color before its attack bar fills. "
+			+ "Shots near the beat earn bigger bonuses."
 		),
 		"player_one_control_description": "Play the called note on your instrument.",
 		"solo_confirm_title": "Ready to play?",
@@ -46,14 +47,15 @@ static func manifest() -> GameManifest:
 		),
 		"instructions_headline": "Play the note the robot calls",
 		"instructions_rules": (
-			"Right note scores  ·  Wrong note -25, never below zero  ·  "
-			+ "Play louder than the room  ·  Esc pauses"
+			"Right note fires  ·  Beat timing earns bonuses  ·  "
+			+ "Wrong note -25  ·  Shoot before the attack bar fills  ·  Esc pauses"
 		),
 		"instructions_demo_prompt": "PLAY THE NOTE SHOWN ON SCREEN",
 		"instructions_solo_summary": (
 			"A note appears; play it on your instrument and the microphone does "
 			+ "the rest. Any octave counts, so play it where it sits best. No "
-			+ "instrument handy? A MIDI keyboard or the computer keyboard works."
+			+ "instrument handy? A MIDI keyboard or the computer keyboard works. "
+			+ "Plated Knuckles take three notes in order; a wrong note resets their armor."
 		),
 		# Overrides the framework's mouse-and-keyboard line, which would be
 		# nonsense here: nothing in this game is played with a control the base
@@ -94,7 +96,7 @@ static func manifest() -> GameManifest:
 		},
 		{
 			"heading": "Sound",
-			"lines": ["Amp hum, power chords and note pings synthesised in-engine"],
+			"lines": ["Amp hum, power chords, note pings and mechanical menu cues synthesised in-engine"],
 		},
 		{
 			"heading": "Instrument",
@@ -135,18 +137,21 @@ static func manifest() -> GameManifest:
 	return game
 
 
-## Rusted metal under a warm stage lamp: the amber the drones outline their
-## called note with is the accent, and the chassis brown they are built from is
-## the plaque. The screens read the same colours the playfield does.
+## Warm stage lighting over cold steel, shared with the corridor and console.
 ##
 ## Only a build that ships this game alone wears it — see [GameCatalog.theme].
 static func _theme() -> GameTheme:
 	var theme := GameTheme.new()
 	theme.logo_texture_path = "res://games/dead_metal_jam/assets/game-icon.svg"
-	theme.logo_color = Color("ffd34e")
-	theme.plaque_color = Color("2a2019")
-	theme.accent = Color("ffd34e")
-	theme.light = Color("ffe3a8")
-	theme.background_top = Color("241a12")
-	theme.background_bottom = Color("0b0806")
+	theme.logo_color = DmjPalette.AMBER
+	theme.plaque_color = DmjPalette.STEEL
+	theme.accent = DmjPalette.AMBER
+	theme.light = Color("fff0c2")
+	theme.background_top = Color("15252d")
+	theme.background_bottom = DmjPalette.INK
+	theme.ui_theme = DmjMenuSkin.create()
+	theme.ui_sounds = DmjMenuSound.create()
+	theme.background_material = preload("res://games/dead_metal_jam/ui/menu_background.tres")
+	theme.plaque_material = preload("res://games/dead_metal_jam/ui/menu_plaque.tres")
+	theme.menu_motion = GameTheme.MenuMotion.FIRM
 	return theme

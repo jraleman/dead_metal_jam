@@ -1,7 +1,7 @@
 class_name EncounterDirector
 extends Node2D
 
-## Owns the rail, the lanes and every drone on them (§8).
+## Owns the combat rooms, firing bays and every drone in them (§8).
 ##
 ## This is where the game's rules live: which drone a played note resolves
 ## against, what timing tier it earned, when a wave is cleared and when the
@@ -17,7 +17,7 @@ extends Node2D
 signal drone_spawned(drone: JamBot)
 signal drone_killed(drone: JamBot, judgement: Dictionary)
 signal drone_fired(drone: JamBot)
-## The rail has started travelling toward the section named [param name].
+## The camera has started repositioning for the section named [param name].
 ## Emitted before the wave rather than with it, because the advance banner is
 ## the player's cue that the pressure has stopped for a moment (§5.3, §8.1).
 ##
@@ -28,21 +28,20 @@ signal wave_started(index: int, total: int)
 signal wave_cleared(index: int, clean: bool)
 signal track_cleared
 
-## A note landed and killed the front-most matching drone.
+## A note landed on the selected matching drone or armor plate.
 ## A note was played while drones were up but matched none of them.
 ## A note was played with nothing valid to hit — between waves, or aimed at a
 ## drone that is not yet in its timing window.
 enum Judgement { HIT, WRONG_NOTE, NOISE }
 
-## Timing tiers from §6, measured against the drone's arrival at the strike
-## line after latency compensation.
-enum Tier { PERFECT, GOOD, EDGE, OUTSIDE }
+## Timing bonuses measured against the scheduled beat after latency compensation.
+enum Tier { PERFECT, GOOD, EDGE, OUTSIDE, SNAP }
 
 ## What the director is doing right now.
 enum Phase {
 	## Nothing loaded, or the track is finished.
 	IDLE,
-	## Rail advancing between waves. Nobody can be hurt here (§8.1).
+	## Repositioning between waves. Nobody can be hurt here (§8.1).
 	ADVANCING,
 	## A wave is on the field.
 	ENCOUNTER,
@@ -66,6 +65,7 @@ enum Mode {
 }
 
 const LANE_COUNT := 3
+const MAX_FRAME_STEP := 1.0 / 60.0
 
 ## Timing windows in seconds, before the accessibility handicap widens them.
 const PERFECT_WINDOW := 0.060
@@ -109,7 +109,7 @@ const DEMO_WINDOW_SCALE := 1.5
 ## still — a static frame is what makes a fixed camera read as a diagram rather
 ## than as a point of view — and the moment it grows past this it starts
 ## fighting the one thing the player is trying to read, which is where a bot is
-## relative to the strike line.
+## aiming its next shot.
 const BOB_IDLE := 1.8
 const BOB_ADVANCE := 5.5
 
@@ -117,9 +117,7 @@ const BOB_ADVANCE := 5.5
 const BOB_RATE_IDLE := 0.6
 const BOB_RATE_ADVANCE := 2.1
 
-## How quickly the bob changes gear. Shared with the rail's own [constant
-## DmjRail.SPEED_BLEND] value so the head and the floor agree about when the
-## march started.
+## How quickly the camera settles between combat and repositioning.
 const BOB_BLEND := 4.0
 
 ## Roster keys a wave may name (§8.2). Unknown keys stage a Rusty Clanky, so a
@@ -130,8 +128,12 @@ const ENEMY_PLATED_KNUCKLE := "plated_knuckle"
 ## Rhythm mode makes every drone accept any note (§3, §8.3). It is a flag on
 ## the rules, not a separate code path.
 var pitch_matters := true
+## Jam accepts correct-note shots throughout the attack warning. Other modes
+## retain their timing gates; the same timing tiers still reward Jam accuracy.
+var arcade_shots := true
+var presentation_speed := 1.0
 
-## Demo mode's "stop time" (§3). The rail, the walk, the wind-up fuses and the
+## Demo mode's "stop time" (§3). The room, entry poses, wind-up fuses and the
 ## chart cursor all hold at each beat and resume the instant it is answered.
 var stop_time := false
 
@@ -155,6 +157,9 @@ var mode_window_scale := 1.0
 ## the way to zero.
 var wrong_note_penalty := WRONG_NOTE_PENALTY
 
+## Presentation size only; the chart and judgement clocks never read it.
+var visual_scale := 1.0
+
 var _phase: Phase = Phase.IDLE
 var _track: Array = []
 var _wave_index := -1
@@ -166,6 +171,7 @@ var _wave_clean := true
 var _drones: Array[JamBot] = []
 var _field := Rect2(Vector2.ZERO, Vector2(640.0, 360.0))
 var _reduced_motion := false
+var _effects_enabled := true
 var _rail: DmjRail
 var _mode: Mode = Mode.JAM
 var _time_stopped := false
@@ -181,6 +187,7 @@ func _ready() -> void:
 	_rail = DmjRail.new()
 	_rail.name = "Rail"
 	_rail.set_reduced_motion(_reduced_motion)
+	_rail.set_effects_enabled(_effects_enabled)
 	add_child(_rail)
 
 
@@ -225,6 +232,7 @@ func begin() -> void:
 func apply_mode(mode: Mode) -> void:
 	_mode = mode
 	pitch_matters = mode != Mode.RHYTHM
+	arcade_shots = mode == Mode.JAM
 	stop_time = mode == Mode.DEMO
 	reports_damage = mode != Mode.DEMO
 	mode_window_scale = DEMO_WINDOW_SCALE if mode == Mode.DEMO else 1.0
@@ -263,18 +271,50 @@ func halt() -> void:
 	_clear_drones()
 
 
-## Per-frame update. `field` is the play area the drones walk down; it is
-## re-read every frame so the rail survives a window resize.
+## Re-read the play area every frame so the room survives a window resize.
 func advance(delta: float, field: Rect2) -> void:
-	# The bots walk the corridor floor, not the whole frame: the strip above
-	# the horizon belongs to the ceiling. The rail is handed the untrimmed
-	# field so it still has something to fill the frame's edges with.
+	# A long frame must not skip Demo's held beat and let a drone fire through it.
+	if delta <= MAX_FRAME_STEP:
+		_advance_step(delta, field)
+		return
+	var remaining := delta
+	while remaining > 0.0:
+		var slice := minf(remaining, MAX_FRAME_STEP)
+		_advance_step(slice, field)
+		remaining -= slice
+		if _time_stopped:
+			break
+
+
+## Fits the room to a new play area without letting the encounter clock move.
+##
+## The corridor is drawn from the field, and the field only ever reached this
+## node through [method advance]. That is fine once a round is running, but a
+## round is on screen before it is running — behind the router's fade, and for
+## the two seconds the microphone spends measuring the room — and in those
+## windows nothing advanced, so the room stayed at the placeholder size it was
+## built with: a small corridor in the corner of the screen that snapped to
+## full size the moment the soundcheck ended.
+##
+## Deliberately not `advance(0.0, field)`: a zero step would move nothing, but
+## it would still run the phase through spawning and wave completion, so
+## re-reading the screen could report events. This re-places the room and the
+## bots standing in it, and nothing else.
+func refresh_layout(field: Rect2) -> void:
+	_field = JamBot.corridor_rect(field)
+	_place_room(0.0, field)
+	_advance_drones(0.0)
+	_mark_front_target()
+
+
+func _advance_step(delta: float, field: Rect2) -> void:
+	# Firing anchors use the inset floor; the room fills the untrimmed frame.
 	_field = JamBot.corridor_rect(field)
 
 	# Demo stops the world at the beat and waits (§3). It is scoped to this
 	# clock on purpose: a global `Engine.time_scale` would fight the shell's
 	# round timer, its tweens and the pause overlay. Everything downstream is
-	# driven from `step`, so the rail, the walk, the wind-up fuses and the
+	# driven from `step`, so the room, entry poses, wind-up fuses and the
 	# chart cursor stop together and cannot drift apart while they are held.
 	_time_stopped = (
 		stop_time and _phase == Phase.ENCOUNTER and _beat_is_waiting()
@@ -292,23 +332,34 @@ func advance(delta: float, field: Rect2) -> void:
 		Phase.IDLE:
 			pass
 
-	# Bobbing the field rather than this node's `position` is what keeps the
-	# corridor and the bots in one piece: they are placed from the same rect,
-	# so they sway together, while the rail's backdrop stays pinned to the
-	# frame and no gap can open at the edge of the screen.
-	_update_bob(step, _phase == Phase.ADVANCING)
-	_field.position += _bob
-
-	if _rail != null:
-		_rail.update_rail(
-			step, field, LANE_COUNT, _phase == Phase.ADVANCING, _bob
-		)
+	_place_room(step, field)
 
 	_advance_drones(step)
 	_mark_front_target()
 
 	if _phase == Phase.ENCOUNTER and _wave_is_over():
 		_finish_wave()
+
+
+## Sways the camera and hands the room its frame for this step.
+##
+## Bobbing the field rather than this node's `position` is what keeps the
+## corridor and the bots in one piece: they are placed from the same rect, so
+## they sway together, while the rail's backdrop stays pinned to the frame and
+## no gap can open at the edge of the screen.
+func _place_room(step: float, field: Rect2) -> void:
+	_update_bob(step, _phase == Phase.ADVANCING)
+	_field.position += _bob
+
+	if _rail == null:
+		return
+	var arena := _upcoming_index() if _phase == Phase.ADVANCING else maxi(_wave_index, 0)
+	var transition := (
+		clampf(_advance_elapsed / maxf(_advance_seconds, 0.001), 0.0, 1.0)
+		if _phase == Phase.ADVANCING else 1.0
+	)
+	_rail.set_arena(arena, transition)
+	_rail.update_rail(step, field, LANE_COUNT, _phase == Phase.ADVANCING, _bob)
 
 
 ## The camera's walk cycle.
@@ -322,9 +373,7 @@ func advance(delta: float, field: Rect2) -> void:
 ## stop-time has to stop *everything* or the freeze looks like a bug.
 func _update_bob(step: float, advancing: bool) -> void:
 	if _reduced_motion:
-		# The one motion here with no informational job at all — the rail still
-		# scrolls to show an advance, but nothing is lost by holding the head
-		# still, and a swaying viewport is exactly what the setting is for.
+		# The room/banner still identifies an advance without camera movement.
 		_bob = Vector2.ZERO
 		return
 
@@ -407,7 +456,7 @@ func resolve_note(
 			Judgement.WRONG_NOTE, Tier.OUTSIDE, null, 0.0, -wrong_note_penalty
 		)
 
-	var target := _front_most_in_window(matches)
+	var target: JamBot = matches[0] if arcade_shots else _front_most_in_window(matches)
 	if target == null:
 		# The right note, but nothing is in its window yet. Treated as noise
 		# rather than a wrong note: the player aimed at a real drone and was
@@ -416,16 +465,24 @@ func resolve_note(
 
 	var error := target.time_to_beat()
 	var tier := tier_for(error, _effective_window())
+	if arcade_shots and tier == Tier.OUTSIDE:
+		tier = Tier.SNAP
 	var points := note_points(tier, streak, cents_off, exact)
+	var shot_position := target.aim_point()
+	var shot_scale := target.scale.x
 	# `strike()`, not `kill()`: most of the roster dies to one note, but a
-	# [PlatedKnuckle] breaks one plate and keeps walking. Asking the bot what a
+	# [PlatedKnuckle] breaks one plate and keeps aiming. Asking the bot what a
 	# correct note does to it is what let the roster grow without the matching
 	# rule learning a second shape (§8.2).
 	if not target.strike():
 		return _judgement(Judgement.NOISE, Tier.OUTSIDE, null, 0.0, 0)
 
 	var killed := not target.is_targetable()
+	if not killed:
+		target.react_to_hit()
 	var judgement := _judgement(Judgement.HIT, tier, target, error, points, killed)
+	judgement["shot_position"] = shot_position
+	judgement["shot_scale"] = shot_scale
 	if killed:
 		drone_killed.emit(target, judgement)
 	return judgement
@@ -452,7 +509,7 @@ static func tier_points(tier: Tier) -> int:
 			return PERFECT_POINTS
 		Tier.GOOD:
 			return GOOD_POINTS
-		Tier.EDGE:
+		Tier.EDGE, Tier.SNAP:
 			return EDGE_POINTS
 		_:
 			return 0
@@ -494,6 +551,8 @@ static func tier_name(tier: Tier) -> String:
 			return "GOOD"
 		Tier.EDGE:
 			return "LATE"
+		Tier.SNAP:
+			return "HIT"
 		_:
 			return "MISS"
 
@@ -504,6 +563,14 @@ func set_reduced_motion(enabled: bool) -> void:
 		_rail.set_reduced_motion(enabled)
 	for drone in _drones:
 		drone.set_reduced_motion(enabled)
+
+
+func set_effects_enabled(enabled: bool) -> void:
+	_effects_enabled = enabled
+	if _rail != null:
+		_rail.set_effects_enabled(enabled)
+	for drone in _drones:
+		drone.set_effects_enabled(enabled)
 
 
 ## True once the track has no waves left and nothing is still shootable.
@@ -632,11 +699,28 @@ func _spawn(plan: Dictionary) -> void:
 	var drone := _build_bot(plan, lane, approach, windup)
 
 	drone.set_reduced_motion(_reduced_motion)
+	drone.set_effects_enabled(_effects_enabled)
+	drone.visual_scale = visual_scale
+	drone.arena_index = _wave_index
+	drone.firing_slot = _free_firing_slot(lane)
+	drone.presentation_speed = presentation_speed
+	drone.show_attack_bar = reports_damage
 	_drones.append(drone)
 	add_child(drone)
 	# Placed once immediately so it never renders a frame at the origin.
 	drone.advance(0.0, _field, LANE_COUNT)
 	drone_spawned.emit(drone)
+
+
+func _free_firing_slot(lane: int) -> int:
+	var occupied: Array[int] = []
+	for drone in _drones:
+		if is_instance_valid(drone) and drone.lane == lane and not drone.is_finished():
+			occupied.append(drone.firing_slot)
+	var slot := 0
+	while occupied.has(slot):
+		slot += 1
+	return slot
 
 
 func _build_bot(
@@ -664,6 +748,9 @@ func _advance_drones(delta: float) -> void:
 	for drone in _drones:
 		if not is_instance_valid(drone):
 			continue
+		drone.visual_scale = visual_scale
+		drone.presentation_speed = presentation_speed
+		drone.show_attack_bar = reports_damage
 		if drone.advance(delta, _field, LANE_COUNT):
 			_wave_clean = false
 			drone_fired.emit(drone)
@@ -675,7 +762,7 @@ func _advance_drones(delta: float) -> void:
 
 
 ## Outlines the drone a note would hit right now — the "one bright target"
-## convention Target Rush already uses (§5.2).
+## convention Triangle Rush already uses (§5.2).
 func _mark_front_target() -> void:
 	var live := _live_drones()
 	var front: JamBot = null
@@ -693,9 +780,8 @@ func _wave_is_over() -> bool:
 	return _live_drones().is_empty()
 
 
-## Targetable drones, front-most first. Front-most means furthest along its
-## approach, which is also the most urgent, so the intuitive read and the
-## optimal read agree (§8.3).
+## Jam prioritizes the next gunshot. The practice modes keep their established
+## lead-in ordering so Demo holds the same demand that its readout names.
 func _live_drones() -> Array[JamBot]:
 	var live: Array[JamBot] = []
 	for drone in _drones:
@@ -703,6 +789,8 @@ func _live_drones() -> Array[JamBot]:
 			live.append(drone)
 	live.sort_custom(
 		func(a: JamBot, b: JamBot) -> bool:
+			if arcade_shots:
+				return a.time_until_fire() < b.time_until_fire()
 			return a.approach_progress() > b.approach_progress()
 	)
 	return live

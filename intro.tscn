@@ -60,11 +60,22 @@ layout_mode = 2
 size_flags_vertical = 3
 mouse_filter = 2
 
+[node name="Eyebrow" type="Label" parent="Frame/Layout"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 20
+text = "PLUG IN. PLAY LOUD."
+horizontal_alignment = 1
+
 [node name="Title" type="Label" parent="Frame/Layout"]
+theme_type_variation = &"MenuHeading"
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(0.94902, 0.968627, 0.976471, 1)
+theme_override_colors/font_color = Color(0.956863, 0.929412, 0.866667, 1)
+theme_override_colors/font_shadow_color = Color(0.031373, 0.054902, 0.070588, 0.8)
+theme_override_constants/shadow_offset_y = 6
 theme_override_font_sizes/font_size = 96
 text = "DEAD METAL JAM"
 horizontal_alignment = 1
@@ -74,7 +85,7 @@ autowrap_mode = 3
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
-theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
 theme_override_font_sizes/font_size = 34
 text = "The amp is still warm."
 horizontal_alignment = 1
@@ -96,7 +107,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 1
-theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
 theme_override_font_sizes/font_size = 24
 text = "Press any key to skip"
 vertical_alignment = 1
@@ -135,6 +146,6 @@ anchors_preset = 9
 anchor_bottom = 1.0
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.686275, 0.866667, 0.917647, 0.75)
+color = Color(1, 0.784314, 0.415686, 0.85)
 
 [connection signal="pressed" from="Frame/Layout/Bottom/SkipButton" to="." method="_on_skip_pressed"]

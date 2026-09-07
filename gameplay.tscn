@@ -1,56 +1,190 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="PackedScene" path="res://scenes/game/game_shell.tscn" id="1_shell"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/gameplay.gd" id="2_script"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/ui/performance_hud.gd" id="3_console"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/ui/segmented_meter.gd" id="4_meter"]
+[ext_resource type="PackedScene" path="res://games/dead_metal_jam/ui/life_rack.tscn" id="5_lives"]
+[ext_resource type="Script" path="res://games/dead_metal_jam/ui/note_strip.gd" id="6_note_strip"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_readout"]
-content_margin_left = 34.0
+content_margin_left = 26.0
+content_margin_top = 16.0
+content_margin_right = 26.0
+content_margin_bottom = 12.0
+bg_color = Color(0.0666667, 0.109804, 0.133333, 0.97)
+border_width_left = 1
+border_width_top = 2
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 0.784314, 0.415686, 0.45)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+shadow_color = Color(0, 0, 0, 0.5)
+shadow_size = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+content_margin_left = 26.0
 content_margin_top = 14.0
-content_margin_right = 34.0
+content_margin_right = 26.0
 content_margin_bottom = 14.0
-bg_color = Color(0.0352941, 0.054902, 0.0666667, 0.82)
+bg_color = Color(0.0666667, 0.109804, 0.133333, 0.94)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(1, 0.827451, 0.305882, 0.28)
-corner_radius_top_left = 18
-corner_radius_top_right = 18
-corner_radius_bottom_right = 18
-corner_radius_bottom_left = 18
-shadow_color = Color(0, 0, 0, 0.45)
-shadow_size = 14
+border_color = Color(0.207843, 0.313725, 0.352941, 0.9)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_score"]
+content_margin_left = 26.0
+content_margin_top = 14.0
+content_margin_right = 26.0
+content_margin_bottom = 14.0
+bg_color = Color(0.0666667, 0.109804, 0.133333, 0.94)
+border_width_left = 3
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.439216, 0.839216, 0.796078, 0.65)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
 
 [node name="DeadMetalJam" instance=ExtResource("1_shell")]
 script = ExtResource("2_script")
+player_one_color = Color(0.439216, 0.839216, 0.796078, 1)
 
-[node name="DmjProgress" type="Label" parent="HUD/Overlay/Margins/Layout/Callout"]
+[node name="PlayerOneCard" parent="HUD/Overlay/Margins/Layout/TopBar" index="0"]
+theme_override_styles/panel = SubResource("StyleBoxFlat_score")
+
+[node name="Caption" parent="HUD/Overlay/Margins/Layout/TopBar/PlayerOneCard/Layout" index="0"]
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+
+[node name="TimerCard" parent="HUD/Overlay/Margins/Layout/TopBar" index="1"]
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="DmjLifeRack" parent="HUD/Overlay/Margins/Layout/TopBar/TimerCard/Layout" instance=ExtResource("5_lives")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+
+[node name="DmjTrackCard" type="PanelContainer" parent="HUD/Overlay/Margins/Layout/TopBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(370, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="Layout" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/TopBar/DmjTrackCard"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="Caption" type="Label" parent="HUD/Overlay/Margins/Layout/TopBar/DmjTrackCard/Layout"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 14
+text = "ON THE SETLIST"
+
+[node name="DmjTrackTitle" type="Label" parent="HUD/Overlay/Margins/Layout/TopBar/DmjTrackCard/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.956863, 0.929412, 0.866667, 1)
+theme_override_font_sizes/font_size = 24
+text = "FREE PLAY"
+text_overrun_behavior = 3
+
+[node name="DmjTrackDetail" type="Label" parent="HUD/Overlay/Margins/Layout/TopBar/DmjTrackCard/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 15
+text = "PRACTICE TRACK / JAM MODE"
+text_overrun_behavior = 3
+
+[node name="TimeProgress" parent="HUD/Overlay/Margins/Layout" index="1"]
+custom_minimum_size = Vector2(0, 4)
+
+[node name="Callout" parent="HUD/Overlay/Margins/Layout" index="2"]
+custom_minimum_size = Vector2(0, 60)
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 24
+vertical_alignment = 1
+
+[node name="DmjProgressGroup" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/Callout"]
+layout_mode = 1
+anchor_right = 0.22
+anchor_bottom = 1.0
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="DmjProgress" type="Label" parent="HUD/Overlay/Margins/Layout/Callout/DmjProgressGroup"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 17
+
+[node name="DmjWaveMeter" type="Range" parent="HUD/Overlay/Margins/Layout/Callout/DmjProgressGroup"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
+mouse_filter = 2
+step = 0.0
+script = ExtResource("4_meter")
+segments = 5
+
+[node name="DmjComboGroup" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/Callout"]
 unique_name_in_owner = true
 layout_mode = 1
-anchors_preset = 15
+anchor_left = 0.78
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-vertical_alignment = 1
-theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_constants/separation = 3
+alignment = 1
 
-[node name="DmjCombo" type="Label" parent="HUD/Overlay/Margins/Layout/Callout"]
+[node name="DmjCombo" type="Label" parent="HUD/Overlay/Margins/Layout/Callout/DmjComboGroup"]
 unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+layout_mode = 2
 mouse_filter = 2
 text = "COMBO x1"
 horizontal_alignment = 2
-vertical_alignment = 1
-theme_override_colors/font_color = Color(1, 0.827451, 0.305882, 1)
-theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 22
+
+[node name="DmjComboMeter" type="Range" parent="HUD/Overlay/Margins/Layout/Callout/DmjComboGroup"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 4)
+layout_mode = 2
+mouse_filter = 2
+step = 0.0
+script = ExtResource("4_meter")
+fill_color = Color(1, 0.784314, 0.415686, 1)
+
+[node name="DmjComboHint" type="Label" parent="HUD/Overlay/Margins/Layout/Callout/DmjComboGroup"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 13
+text = "5 NOTES TO x2"
+horizontal_alignment = 2
 
 [node name="DmjPrompt" type="PanelContainer" parent="HUD/Overlay/Margins/Layout"]
 unique_name_in_owner = true
@@ -59,48 +193,171 @@ custom_minimum_size = Vector2(0, 208)
 layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_readout")
+script = ExtResource("3_console")
 
 [node name="Layout" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt"]
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/separation = 2
+theme_override_constants/separation = 8
 
-[node name="DmjPromptCaption" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout"]
+[node name="DmjConsoleRow" type="BoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_constants/separation = 34
+
+[node name="Target" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow"]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="DmjPromptCaption" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 text = "PLAY THIS NOTE"
-horizontal_alignment = 1
-theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
 theme_override_font_sizes/font_size = 16
 
-[node name="DmjTarget" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout"]
+[node name="DmjTarget" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
 text = "…"
-horizontal_alignment = 1
-theme_override_colors/font_color = Color(0.686275, 0.866667, 0.917647, 1)
-theme_override_font_sizes/font_size = 56
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 76
 
-[node name="DmjHeard" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout"]
+[node name="DmjThreat" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 16
+text = "ACQUIRING TARGETS"
+autowrap_mode = 3
+
+[node name="DmjReadouts" type="BoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 34
+
+[node name="Input" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="AttackBarSpace" type="Control" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
+custom_minimum_size = Vector2(0, 6)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="DmjAttackBar" type="Range" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target/AttackBarSpace"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+max_value = 1.0
+step = 0.0
+script = ExtResource("4_meter")
+segments = 10
+fill_color = Color(1, 0.784314, 0.415686, 1)
+
+[node name="Caption" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Input"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.439216, 0.839216, 0.796078, 1)
+theme_override_font_sizes/font_size = 15
+text = "INPUT SIGNAL"
+
+[node name="DmjSignalMeter" type="Range" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Input"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+mouse_filter = 2
+max_value = 1.0
+step = 0.0
+script = ExtResource("4_meter")
+segments = 28
+
+[node name="DmjHeard" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Input"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 mouse_filter = 2
-horizontal_alignment = 1
 vertical_alignment = 1
-theme_override_colors/font_color = Color(0.94902, 0.968627, 0.976471, 1)
+autowrap_mode = 3
+text = "No note yet"
+theme_override_colors/font_color = Color(0.956863, 0.929412, 0.866667, 1)
 theme_override_font_sizes/font_size = 20
+
+[node name="DmjNoteStrip" type="Range" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Input"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 27)
+layout_mode = 2
+mouse_filter = 2
+min_value = -1.0
+max_value = 11.0
+value = -1.0
+script = ExtResource("6_note_strip")
+
+[node name="Feedback" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts"]
+custom_minimum_size = Vector2(310, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="DmjFeedbackCaption" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Feedback"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 15
+text = "AMPLIFY YOUR ACCURACY"
+autowrap_mode = 3
+
+[node name="DmjFeedback" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Feedback"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.956863, 0.929412, 0.866667, 1)
+theme_override_font_sizes/font_size = 28
+text = "MAKE SOME NOISE"
+
+[node name="DmjFeedbackDetail" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/DmjReadouts/Feedback"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 14
+text = "YOUR INSTRUMENT IS THE WEAPON"
+
+[node name="Rule" type="ColorRect" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout"]
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.207843, 0.313725, 0.352941, 0.7)
 
 [node name="DmjStatus" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
+custom_minimum_size = Vector2(0, 34)
 layout_mode = 2
 mouse_filter = 2
 text = "Measuring the room. Stay quiet for a moment."
-horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
-theme_override_colors/font_color = Color(0.576471, 0.65098, 0.690196, 1)
-theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 18

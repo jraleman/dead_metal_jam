@@ -151,7 +151,7 @@ func _compile_beat(
 	}
 
 	if beat.enemy == "plated_knuckle":
-		var phrase := beat.phrase()
+		var phrase := PlatedKnuckle.normalize_sequence(beat.phrase(), beat.note)
 		plan["notes"] = phrase
 		plan["note"] = phrase[0]
 		# Written into the plan, not left to the bot to widen at spawn: the

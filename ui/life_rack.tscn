@@ -1,0 +1,49 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://games/dead_metal_jam/ui/life_rack.gd" id="1_script"]
+
+[node name="DmjLifeRack" type="Control"]
+custom_minimum_size = Vector2(280, 112)
+layout_mode = 2
+mouse_filter = 1
+script = ExtResource("1_script")
+
+[node name="LifeHeading" type="BoxContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_right = 1.0
+offset_bottom = 26.0
+theme_override_constants/separation = 12
+mouse_filter = 2
+
+[node name="Caption" type="Label" parent="LifeHeading"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
+theme_override_font_sizes/font_size = 14
+text = "AMP CORE"
+mouse_filter = 2
+
+[node name="LifeCount" type="Label" parent="LifeHeading"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+horizontal_alignment = 2
+theme_override_colors/font_color = Color(0.956863, 0.929412, 0.866667, 1)
+theme_override_font_sizes/font_size = 24
+text = "3 / 3 LIVES"
+mouse_filter = 2
+
+[node name="LifeStatus" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_right = 1.0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -20.0
+grow_vertical = 0
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
+theme_override_font_sizes/font_size = 14
+text = "KEEP THE AMP ALIVE"
+mouse_filter = 2

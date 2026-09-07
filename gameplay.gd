@@ -30,6 +30,7 @@ const GAME_ID := "dead_metal_jam"
 ## How long a heard note stays on screen, so a decaying string does not flicker
 ## away before it has been read.
 const HEARD_HOLD := 0.8
+const HEARD_IDLE := "No note yet"
 
 ## How long a judgement callout ("PERFECT") stays up.
 const CALLOUT_HOLD := 0.5
@@ -70,22 +71,6 @@ const MAX_ROUND_SECONDS := 180.0
 ## source is attached (§4.5). Rebindable from Settings → Controls, so the key
 ## itself is declared in [DmjOptions] and read from [Settings] at press time.
 
-## Vertical strip reserved at the bottom of the screen for the note readout, so
-## drones never walk underneath the most important widget in the game (§5.1).
-##
-## The readout is laid out by the shell's own HUD column rather than pinned to
-## the viewport, which is what keeps it from ever landing on the audio caption.
-## That in turn fixes its top edge relative to the play area: the panel's own
-## height plus the HUD's bottom margin, less the clearance the shell already
-## applies, plus enough room for the front row of drones — a drone is drawn
-## centred on its position, so the rail has to stop half a body short.
-const READOUT_PANEL_HEIGHT := 208.0
-const READOUT_PANEL_MARGIN := 30.0
-const DRONE_FOOT_ROOM := JamBot.BODY_SIZE.y * 0.5 + 8.0
-const READOUT_CLEARANCE := (
-	READOUT_PANEL_HEIGHT + READOUT_PANEL_MARGIN + DRONE_FOOT_ROOM - BOTTOM_CLEARANCE
-)
-
 ## Scores are floored here. A wrong note costs points and the combo, but a run
 ## of them must never leave the player digging out of a hole — the penalty is
 ## there to make experimenting cost something, not to make a round unwinnable.
@@ -124,6 +109,11 @@ var _router: NoteRouter
 var _mic: MicNoteSource
 var _keys: KeyboardNoteSource
 var _director: EncounterDirector
+var _shot_fx: DmjShotFx
+var _ending_left := -1.0
+## The round's song. This game plays it itself rather than through
+## `AudioManager`, so it stops when the world does — see [DmjTrackBed].
+var _bed: DmjTrackBed
 ## Charts already read off disk, by path. See [method _chart_at].
 var _charts: Dictionary = {}
 var _track: Array = []
@@ -162,18 +152,40 @@ var _time_stopped := false
 ## rewrites the status line every frame (§5.3).
 var _advance_line_now := ""
 
-@onready var _prompt_root: Control = %DmjPrompt
+@onready var _prompt_root: DmjPerformanceHud = %DmjPrompt
 @onready var _prompt_caption: Label = %DmjPromptCaption
 @onready var _target_label: Label = %DmjTarget
+@onready var _threat_label: Label = %DmjThreat
+@onready var _attack_bar: DmjSegmentedMeter = %DmjAttackBar
 @onready var _heard_label: Label = %DmjHeard
 @onready var _status_label: Label = %DmjStatus
-@onready var _combo_label: Label = %DmjCombo
 @onready var _progress_label: Label = %DmjProgress
+@onready var _life_rack: DmjLifeRack = %DmjLifeRack
 @onready var _bottom_row: HBoxContainer = $HUD/Overlay/Margins/Layout/BottomRow
 
 
 func game_id() -> String:
 	return GAME_ID
+
+
+func _configure_mode_ui() -> void:
+	super()
+	_player_one_card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_life_rack.visible = _lives_mode
+	_mode_title.visible = not _lives_mode
+	_time_label.visible = not _lives_mode
+	_time_caption.visible = not _lives_mode
+	_time_progress.visible = not _lives_mode
+
+
+func _update_lives() -> void:
+	super()
+	if _lives_mode:
+		_life_rack.set_lives(int(_lives[PLAYER_ONE]), _starting_lives)
+
+
+func _lives_rule_note() -> String:
+	return "Each firing robot burns one tube (1 life)" if _lives_mode else ""
 
 
 ## Which inputs are attached is the player's choice (Settings → Game → Note
@@ -187,9 +199,13 @@ func _build_playfield() -> void:
 	# panel is folded into it — see [method _play_instruction].
 	_bottom_row.hide()
 
+	_bed = DmjTrackBed.new()
+	add_child(_bed)
+
 	_router = NoteRouter.new()
 	_router.name = "NoteRouter"
 	_router.note_started.connect(_on_note_started)
+	_router.input_level_changed.connect(_prompt_root.set_input_level)
 	add_child(_router)
 
 	var preference := Settings.tunable_choice(DmjOptions.NOTE_SOURCE_KEY)
@@ -230,6 +246,47 @@ func _build_playfield() -> void:
 	_director.wave_cleared.connect(_on_wave_cleared)
 	_director.track_cleared.connect(_on_track_cleared)
 	_playfield.add_child(_director)
+	_shot_fx = DmjShotFx.new()
+	_shot_fx.name = "Shots"
+	_shot_fx.set_presentation_options(_reduced_motion_enabled, _intense_effects_enabled)
+	_director.add_child(_shot_fx)
+
+	# Deferred so the HUD containers have sorted: the play area is measured
+	# against them, and their geometry is still the scene file's until then.
+	_refresh_encounter_layout.call_deferred()
+
+
+## Keeps the room the size of the screen it is drawn on while the encounter is
+## standing still.
+##
+## [method _update_round] fits the room every frame it advances the encounter,
+## but a round is on screen before it advances: [GameShell] does not drive it
+## until the router's fade has finished, and the update stands aside again for
+## the two seconds the microphone spends measuring the room. Nothing re-read
+## the play area in either window, so the corridor kept the placeholder size
+## [EncounterDirector] was built with — a small room in the corner of the
+## screen that snapped to full size once the soundcheck ended.
+func _process(delta: float) -> void:
+	super(delta)
+	if not _round_active or _is_measuring_the_room():
+		_refresh_encounter_layout()
+
+
+## Fits the corridor and the shot effects to the current play area. Re-reads
+## the geometry only; nothing here moves the round on.
+func _refresh_encounter_layout() -> void:
+	if _director == null:
+		return
+	var bounds := _playfield_bounds()
+	_director.refresh_layout(bounds)
+	if _shot_fx != null:
+		_shot_fx.set_field(bounds)
+
+
+## True while the microphone is still learning the room, which is the one part
+## of a running round that holds the encounter still.
+func _is_measuring_the_room() -> bool:
+	return _mic != null and _mic.is_calibrating()
 
 
 func _source_enabled(preference: int, source: int) -> bool:
@@ -270,6 +327,11 @@ func _load_round_settings() -> void:
 	)
 
 	super()
+	_life_rack.set_protected(_round_mode() == EncounterDirector.Mode.DEMO)
+	_life_rack.set_presentation_options(_reduced_motion_enabled, _intense_effects_enabled)
+	_prompt_root.set_track(
+		_load_chart(), EncounterDirector.mode_name(_round_mode()).to_upper()
+	)
 
 	if _director == null:
 		return
@@ -277,6 +339,7 @@ func _load_round_settings() -> void:
 	# `apply_mode` sets what kind of game this is, and everything below it sets
 	# how forgiving that game is being (§3, §9.4).
 	_director.apply_mode(_round_mode())
+	_director.presentation_speed = _round_gameplay_speed
 	# Reuses the shared "make it easier" handicap rather than adding a second
 	# difficulty dial (§6); the game's own leniency option multiplies into it
 	# so the two agree instead of competing.
@@ -287,6 +350,7 @@ func _load_round_settings() -> void:
 		Settings.tunable(DmjOptions.WRONG_NOTE_PENALTY_KEY)
 	)
 	_director.set_reduced_motion(_reduced_motion_enabled)
+	_director.set_effects_enabled(_intense_effects_enabled)
 
 
 ## The player's mode choice, translated into the director's own vocabulary.
@@ -353,6 +417,9 @@ func _chart_at(path: String) -> JamChart:
 
 
 func _reset_round_state() -> void:
+	_ending_left = -1.0
+	_shot_fx.clear()
+	_shot_fx.show()
 	_hits = 0
 	_misses = 0
 	_kills = 0
@@ -366,11 +433,14 @@ func _reset_round_state() -> void:
 	_track_finished = false
 	_time_stopped = false
 	_advance_line_now = ""
-	_heard_label.text = ""
+	_heard_label.text = HEARD_IDLE
 	_target_label.text = "—"
+	_threat_label.text = "ACQUIRING TARGETS"
+	_attack_bar.hide()
+	_attack_bar.value = 0.0
 	_progress_label.text = ""
 	_prompt_caption.text = "INCOMING"
-	_update_combo_label()
+	_prompt_root.reset_performance(_track.size())
 	_director.set_track(_track)
 
 
@@ -388,24 +458,20 @@ func _activate_round() -> void:
 ## rhythm game whose second round opens in silence is a bug the player reads
 ## as the game having broken.
 ##
-## It plays a *duplicate* of the stream, which looks redundant and is not.
-## `AudioManager.play_music()` no-ops when the same stream object is already
-## playing, and `stop_music()` fades out and only calls `stop()` from a tween
-## callback at the *end* of that fade. Pressing Play Again inside the fade
-## would hit that no-op and then be silenced by the callback already in
-## flight — the silent round this is here to prevent. A fresh instance fails
-## the identity check instead, so playback restarts and the pending fade is
-## killed. The MP3 bytes are copy-on-write, so the copy is a handle rather
-## than a second megabyte.
+## The song is played on the game's own [DmjTrackBed] rather than through
+## `AudioManager`, because a round's song is part of the round: it has to stop
+## when the world stops and leave when the scene leaves, and the manager's
+## players run with `PROCESS_MODE_ALWAYS` precisely so that they do neither.
+## The bed handles both itself; the only part wired up on this side is the way
+## *back* into a round, in [method _on_pause_closed]. Whatever the *menu* left
+## playing is still the manager's, so it is faded out here.
 ##
 ## It runs through the soundcheck on purpose — the noise floor has to be
 ## measured against the room the player will actually be playing in, and that
 ## room has this song in it (§4.3).
 func _start_track_music() -> void:
-	var stream := _round_music()
-	if stream == null:
-		return
-	AudioManager.play_music(stream.duplicate(), 0.4)
+	AudioManager.stop_music(DmjTrackBed.MENU_HANDOVER_FADE)
+	_bed.start(_round_music())
 
 
 ## The bed for this round.
@@ -423,8 +489,13 @@ func _round_music() -> AudioStream:
 
 
 func _finish_round() -> void:
+	_ending_left = -1.0
+	if _shot_fx != null:
+		_shot_fx.clear()
+		_shot_fx.hide()
 	_set_readout_visible(false)
-	AudioManager.stop_music(0.6)
+	if _bed != null:
+		_bed.finish(DmjTrackBed.ROUND_END_FADE)
 	# Demo may have left it paused mid-beat, and a paused timer would survive
 	# into the next round.
 	_round_timer.paused = false
@@ -435,11 +506,34 @@ func _finish_round() -> void:
 		_director.halt()
 
 
+## Let the final hitscan tracer read before the results panel covers it.
+func _end_round() -> void:
+	if _ending_left >= 0.0:
+		return
+	if _round_active and _shot_fx != null and _shot_fx.active_count() > 0:
+		_ending_left = DmjShotFx.RESULT_SETTLE
+		_round_timer.stop()
+		_router.set_accepting(false)
+		return
+	super()
+
+
+## Resuming is the only way out of the pause overlay that leaves a round to go
+## back to, and the one thing about the song the bed cannot do for itself.
+## `closed` is emitted by the pause menu's own `resume()` and by nothing else,
+## so exiting cannot reach this. Unpausing would be the wrong signal: the
+## overlay's *Exit to main menu* unpauses the tree *before* handing the scene
+## to `Router`, so the song would blip back on over a scene on its way out.
+func _on_pause_closed() -> void:
+	super()
+	if _round_active and _bed != null:
+		_bed.resume()
+
+
 ## The readout and the combo chip only mean anything while a round is running,
 ## so they appear and disappear together.
 func _set_readout_visible(shown: bool) -> void:
-	_prompt_root.visible = shown
-	_combo_label.visible = shown
+	_prompt_root.set_round_visible(shown)
 
 
 ## The one standing instruction, plus whatever the round mode charges for a
@@ -448,10 +542,10 @@ func _set_readout_visible(shown: bool) -> void:
 ## The instruction strip. It has to describe the mode being played, because the
 ## three ask for different things and the readout above it is only one word.
 func _play_instruction() -> String:
-	var verb := "Play the note printed on each robot."
+	var verb := "Match the note before its attack bar fills. On-beat shots earn bonuses."
 	match _round_mode():
 		EncounterDirector.Mode.RHYTHM:
-			verb = "Play any note as each robot arrives — timing is all that counts."
+			verb = "Fire any note when the target ring closes — timing is all that counts."
 		EncounterDirector.Mode.DEMO:
 			return "Play the note printed on each robot. Time waits for you, and nothing can hurt you."
 	var rule := _lives_rule_note()
@@ -463,6 +557,12 @@ func _play_instruction() -> String:
 func _update_round(delta: float, _time_left: float) -> void:
 	if _router == null:
 		return
+	_shot_fx.set_field(_playfield_bounds())
+	if _ending_left >= 0.0:
+		_ending_left = maxf(_ending_left - delta, 0.0)
+		if is_zero_approx(_ending_left):
+			super._end_round()
+		return
 
 	# Nothing the player does can score while the room is still being measured,
 	# so the countdown waits for them rather than the other way round. This
@@ -470,7 +570,8 @@ func _update_round(delta: float, _time_left: float) -> void:
 	# the soundcheck is no more scoreable than a strummed one. With the
 	# microphone switched off there is no room to measure, so play starts at
 	# once.
-	var calibrating := _mic != null and _mic.is_calibrating()
+	var calibrating := _is_measuring_the_room()
+	_prompt_root.set_calibrating(calibrating)
 	_round_timer.paused = calibrating
 	_router.set_accepting(not calibrating and not _player_is_out(PLAYER_ONE))
 	if calibrating:
@@ -506,20 +607,54 @@ func _update_round(delta: float, _time_left: float) -> void:
 	_update_target_readout()
 
 	_heard_hold = maxf(_heard_hold - delta, 0.0)
-	if is_zero_approx(_heard_hold) and not _heard_label.text.is_empty():
-		_heard_label.text = ""
+	if is_zero_approx(_heard_hold) and _heard_label.text != HEARD_IDLE:
+		_heard_label.text = HEARD_IDLE
 
 	_callout_hold = maxf(_callout_hold - delta, 0.0)
 	if is_zero_approx(_callout_hold) and not _callout.text.is_empty():
 		_callout.text = ""
 
 
-## Drones walk down the play area, so its bottom is raised to clear the note
-## readout. Everything else stays on the shell's own clearances.
+## Measure the actual HUD: wrapping, captions and the compact console can all
+## change its height without changing where a drone's feet are allowed to go.
 func _playfield_bounds() -> Rect2:
 	var bounds := super()
-	bounds.size.y = maxf(bounds.size.y - READOUT_CLEARANCE, 80.0)
+	var top := maxf(bounds.position.y, _callout.get_global_rect().end.y + 16.0)
+	var bottom := bounds.end.y
+	if _prompt_root.visible:
+		bottom = minf(
+			bottom, _prompt_root.get_global_rect().position.y
+			- _prompt_root.caption_clearance(Settings.audio_captions_enabled())
+		)
+	var art_scale := DmjDroneArt.fit_scale(bottom - top)
+	if _director != null:
+		_director.visual_scale = art_scale
+	bottom -= DmjDroneArt.foot_clearance(art_scale)
+	bounds.position.y = top
+	bounds.size.y = maxf(bottom - top, 1.0)
 	return bounds
+
+
+func _set_reduced_motion_enabled(value: bool) -> void:
+	super(value)
+	if _life_rack != null:
+		_life_rack.set_presentation_options(value, _intense_effects_enabled)
+	if _shot_fx != null:
+		_shot_fx.set_presentation_options(value, _intense_effects_enabled)
+	if _director != null:
+		_director.set_reduced_motion(value)
+
+
+func _set_intense_effects_enabled(value: bool) -> void:
+	super(value)
+	if _life_rack != null:
+		_life_rack.set_presentation_options(_reduced_motion_enabled, value)
+	if _shot_fx != null:
+		_shot_fx.set_presentation_options(_reduced_motion_enabled, value)
+	if _director != null:
+		_director.set_effects_enabled(value)
+	if not value and _director != null:
+		_director.flash_rail(0.0)
 
 
 ## The self-test tone is reachable during a round because a silent microphone
@@ -560,10 +695,12 @@ func _on_controls_changed() -> void:
 ## router has already applied that source's latency compensation and dropped it
 ## if another source reported the same note a moment earlier.
 func _on_note_started(event: NoteEvent) -> void:
-	if _player_is_out(PLAYER_ONE):
+	if not _round_active or _ending_left >= 0.0 or _player_is_out(PLAYER_ONE):
 		return
 
 	_heard_hold = HEARD_HOLD
+	_prompt_root.register_note(event.velocity, event.midi_note)
+	_heard_label.add_theme_color_override("font_color", DmjPalette.note_color(event.midi_note))
 	_heard_label.text = "heard %s · %s" % [
 		PitchDetector.note_label(event.midi_note),
 		(
@@ -579,6 +716,14 @@ func _on_note_started(event: NoteEvent) -> void:
 	var judgement := _director.resolve_note(
 		event.pitch_class, _streaks[PLAYER_ONE], event.cents_off, exact
 	)
+	_shot_fx.set_field(_playfield_bounds())
+	if int(judgement["kind"]) == EncounterDirector.Judgement.HIT:
+		_shot_fx.player_shot(
+			judgement["shot_position"], bool(judgement["killed"]),
+			event.midi_note, float(judgement["shot_scale"])
+		)
+	else:
+		_shot_fx.miss()
 
 	match int(judgement.get("kind", EncounterDirector.Judgement.NOISE)):
 		EncounterDirector.Judgement.HIT:
@@ -593,10 +738,11 @@ func _on_note_started(event: NoteEvent) -> void:
 	# answers correct notes is scoring feedback wearing a light's clothes.
 	# How *much* it lights is where the difference shows.
 	var landed := int(judgement.get("kind", EncounterDirector.Judgement.NOISE))
-	_director.flash_rail(
-		(0.75 if landed == EncounterDirector.Judgement.HIT else 0.3)
-		+ event.velocity * 0.25
-	)
+	if _intense_effects_enabled and not _reduced_motion_enabled:
+		_director.flash_rail(
+			(0.75 if landed == EncounterDirector.Judgement.HIT else 0.3)
+			+ event.velocity * 0.25
+		)
 
 	_update_scores()
 	_update_streaks()
@@ -613,9 +759,14 @@ func _score_hit(event: NoteEvent, judgement: Dictionary) -> void:
 
 	var tier := int(judgement.get("tier", EncounterDirector.Tier.EDGE))
 	_show_callout(EncounterDirector.tier_name(tier))
+	_prompt_root.show_feedback(
+		EncounterDirector.tier_name(tier),
+		"+%d POINTS" % int(judgement.get("points", 0)),
+		DmjPalette.note_color(event.midi_note)
+	)
 
 	# A correct note does not always end a robot: a [PlatedKnuckle] sheds one
-	# plate and keeps walking (§8.2). It scores and it feeds the combo either
+	# plate and keeps aiming (§8.2). It scores and it feeds the combo either
 	# way — the difference is only how hard the world reacts, so the player can
 	# tell "that one is down" from "keep going".
 	var killed := bool(judgement.get("killed", true))
@@ -641,10 +792,10 @@ func _score_hit(event: NoteEvent, judgement: Dictionary) -> void:
 			_remaining_phrase_note(drone, killed),
 		]
 	)
-	_flash_screen(_player_color(PLAYER_ONE), 0.12 if killed else 0.07)
+	_flash_screen(DmjPalette.note_color(event.midi_note), 0.10 if killed else 0.05)
 	# A harder-played note hits harder. Velocity colours the reaction; it never
 	# decides whether the note counted.
-	var punch := 3.0 if killed else 1.6
+	var punch := 4.5 if killed else 2.3
 	_add_screen_shake(punch + event.velocity * punch)
 
 	_unlock_skill_achievement(
@@ -679,6 +830,7 @@ func _score_wrong_note(event: NoteEvent, judgement: Dictionary) -> void:
 	_add_score(int(judgement.get("points", 0)))
 	_streaks[PLAYER_ONE] = 0
 
+	_prompt_root.show_feedback("WRONG NOTE", "MATCH THE CALLED NOTE", DmjPalette.DANGER)
 	AudioManager.play_game_miss()
 	AudioManager.request_caption(
 		"Wrong note: %s" % PitchDetector.note_name(event.midi_note)
@@ -692,6 +844,10 @@ func _score_wrong_note(event: NoteEvent, judgement: Dictionary) -> void:
 ## has not reached its window yet. Costs the combo, never the score (§6).
 func _score_noise() -> void:
 	_streaks[PLAYER_ONE] = 0
+	_prompt_root.show_feedback(
+		"SHOT MISSED", "WAIT FOR THE TARGET RING" if not _director.arcade_shots else "NO TARGET",
+		DmjPalette.MUTED
+	)
 
 
 ## A drone completed its wind-up and fired. This is the game's one mistake, so
@@ -701,13 +857,17 @@ func _score_noise() -> void:
 ##
 ## Demo is the exception, and it is the director that says so rather than a
 ## mode test here — nobody can die in Demo under either round mode (§3).
-func _on_drone_fired(_drone: JamBot) -> void:
+func _on_drone_fired(drone: JamBot) -> void:
 	_streaks[PLAYER_ONE] = 0
 	_hit_stop = HIT_STOP
 	_took_a_hit = true
 	_update_streaks()
 	_update_combo_label()
 	if _director.reports_damage:
+		if drone != null:
+			_shot_fx.set_field(_playfield_bounds())
+			_shot_fx.enemy_shot(drone.muzzle_point())
+		_prompt_root.show_feedback("HIT TAKEN", "BEAT THE ATTACK BAR", DmjPalette.DANGER)
 		_lose_life(PLAYER_ONE)
 
 
@@ -724,11 +884,15 @@ func _add_score(points: int) -> void:
 ## The section's own name arrives here and is deliberately dropped — see
 ## [constant ADVANCE_LINES].
 func _on_section_started(_name: String, index: int, total: int) -> void:
-	_prompt_caption.text = "RAIL ADVANCING"
+	_prompt_caption.text = "CHANGING POSITION"
+	_threat_label.text = DmjArenaLayout.arena_name(index)
 	_progress_label.text = _progress_caption(index, total)
+	_prompt_root.set_wave(index, total)
 	_advance_line_now = _advance_line(index, total)
 	AudioManager.request_caption(
-		"Rail advancing. Wave %d of %d. %s" % [index + 1, total, _advance_line_now]
+		"Moving to %s. Wave %d of %d. %s" % [
+			DmjArenaLayout.arena_name(index), index + 1, total, _advance_line_now,
+		]
 	)
 	# Not on the opening advance: the shell has just announced GO! and two
 	# banners in the same frame read as a glitch rather than as a cue.
@@ -739,6 +903,7 @@ func _on_section_started(_name: String, index: int, total: int) -> void:
 func _on_wave_started(index: int, total: int) -> void:
 	_prompt_caption.text = "INCOMING"
 	_progress_label.text = _progress_caption(index, total)
+	_prompt_root.set_wave(index, total)
 	_advance_line_now = ""
 	_section_all_perfect = true
 	_section_kills = 0
@@ -762,7 +927,8 @@ static func _advance_line(index: int, total: int) -> String:
 	return ADVANCE_LINES[index % ADVANCE_LINES.size()]
 
 
-func _on_wave_cleared(_index: int, clean: bool) -> void:
+func _on_wave_cleared(index: int, clean: bool) -> void:
+	_prompt_root.clear_wave(index)
 	# Unlocked here rather than at the end of the round because a section is
 	# the unit being claimed: a player who plays one section perfectly and then
 	# falls apart has still done the thing.
@@ -784,7 +950,7 @@ func _on_wave_cleared(_index: int, clean: bool) -> void:
 ## winning early, so this calls the inherited settle path directly (§7.4) —
 ## the same one the countdown and an empty lives pool both use.
 func _on_track_cleared() -> void:
-	if _track_finished or not _round_active:
+	if _track_finished or not _round_active or _ending_left >= 0.0:
 		return
 	_track_finished = true
 	_progress_label.text = "TRACK CLEARED"
@@ -798,9 +964,14 @@ func _on_track_cleared() -> void:
 func _update_target_readout() -> void:
 	var live := _director.live_drones()
 	if live.is_empty():
+		_prompt_caption.text = "TRACK CLEARED" if _track_finished else "NO ACTIVE TARGETS"
 		_target_label.text = "—"
+		_threat_label.text = "AREA CLEAR"
+		_attack_bar.hide()
+		_attack_bar.value = 0.0
+		_prompt_root.set_called_note(-1)
 		if _director.phase() == EncounterDirector.Phase.ADVANCING:
-			_prompt_caption.text = "RAIL ADVANCING"
+			_prompt_caption.text = "CHANGING POSITION"
 			# This runs every frame and would otherwise overwrite whatever
 			# `_on_section_started()` wrote one frame earlier, so the advance's
 			# line is held rather than set once and lost.
@@ -812,9 +983,22 @@ func _update_target_readout() -> void:
 		return
 
 	var front: JamBot = live[0]
+	var speed := maxf(_round_gameplay_speed, 0.1)
+	var bonus := -front.time_to_beat() / speed
+	_attack_bar.visible = _director.reports_damage
+	_attack_bar.value = front.attack_progress()
+	_attack_bar.fill_color = DmjPalette.DANGER if _attack_bar.value >= 0.78 else DmjPalette.AMBER
+	_threat_label.text = "ON BEAT / BONUS" if absf(bonus) <= 0.14 else (
+		"ENEMY CHARGING" if bonus > 0.14 else (
+			"INCOMING FIRE" if _director.arcade_shots else "BEAT MISSED"
+		)
+	)
+	if not _director.reports_damage:
+		_threat_label.text = "DEMO / NO DAMAGE"
 	# Asks the bot how much it still wants rather than what kind of bot it is,
 	# so a new enemy never means editing the readout (§5.1).
 	var demand := front.demand_size()
+	_prompt_root.set_called_note(front.required_note if _director.pitch_matters else -1)
 
 	# Rhythm asks for an attack, not a pitch (§3), so printing a letter there
 	# would be the game telling the player to do something it is not going to
@@ -838,8 +1022,7 @@ func _update_target_readout() -> void:
 
 
 func _update_combo_label() -> void:
-	var multiplier := EncounterDirector.combo_multiplier(_streaks[PLAYER_ONE])
-	_combo_label.text = "COMBO x%d" % multiplier
+	_prompt_root.set_combo(_streaks[PLAYER_ONE])
 
 
 func _show_callout(text: String) -> void:
@@ -926,6 +1109,7 @@ func _round_highlight_summary() -> String:
 
 
 func _on_calibrated(_noise_floor: float) -> void:
+	_prompt_root.set_calibrating(false)
 	_prompt_caption.text = "INCOMING"
 	_status_label.text = _play_instruction()
 
@@ -934,6 +1118,7 @@ func _on_calibrated(_noise_floor: float) -> void:
 ## the MIDI and keyboard sources are attached independently, so the message
 ## says what is still possible rather than only what broke.
 func _on_capture_failed(reason: String) -> void:
+	_prompt_root.set_calibrating(false)
 	var alternatives := _router.available_sources().size()
 	if alternatives > 0:
 		_prompt_caption.text = "INCOMING"

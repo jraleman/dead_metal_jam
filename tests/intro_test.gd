@@ -154,6 +154,16 @@ func _test_timeline() -> void:
 		return
 
 	_expect(drones.get_child_count() == 0, "The opening must start on an empty stage.")
+	var rail := intro.get("_rail") as DmjRail
+	_expect(rail != null, "The opening shares the playable corridor.")
+	if rail != null:
+		var field: Rect2 = intro.call("_drone_field")
+		var card: Control = intro.get_node("%Card")
+		_expect(
+			(field.position.y - DmjRail.BACKDROP_PADDING) * rail.scale.y
+			>= card.get_global_rect().end.y,
+			"The corridor backdrop must not crowd the narration."
+		)
 
 	_advance(intro, 2.0)
 	_expect(

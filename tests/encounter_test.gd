@@ -45,7 +45,7 @@ func _initialize() -> void:
 
 	_test_empty_track_finishes()
 	_test_rail_advance_precedes_the_first_wave()
-	_test_early_note_is_noise()
+	_test_early_note_is_an_arcade_hit()
 	_test_note_on_arrival_is_a_hit()
 	_test_wrong_note_costs_points()
 	_test_note_between_waves_is_noise()
@@ -59,7 +59,7 @@ func _initialize() -> void:
 
 	_test_plated_knuckle_needs_every_note()
 	_test_plated_knuckle_paces_its_plates()
-	_test_plated_knuckle_falls_back_to_one_note()
+	_test_plated_knuckle_normalizes_to_three_hits()
 	_test_wrong_note_breaks_a_started_phrase()
 	_test_wrong_note_spares_an_untouched_phrase()
 	_test_broken_phrase_stays_hittable()
@@ -286,17 +286,18 @@ func _test_rail_advance_precedes_the_first_wave() -> void:
 	director.free()
 
 
-func _test_early_note_is_noise() -> void:
+func _test_early_note_is_an_arcade_hit() -> void:
 	var director := _opened_director([_drone_plan(1, 40, 0.0, 2.0)])
 	_run(director, 0.3)
 
 	var judgement := director.resolve_note(4, 0)
 	_check(
-		_kind(judgement) == EncounterDirector.Judgement.NOISE,
-		"The right note played far too early is noise, not a mistake."
+		_kind(judgement) == EncounterDirector.Judgement.HIT
+		and int(judgement["tier"]) == EncounterDirector.Tier.SNAP,
+		"An early correct note connects in arcade Jam without a timing bonus."
 	)
-	_check(int(judgement.get("points", -1)) == 0, "Early notes cost nothing.")
-	_check(director.live_drones().size() == 1, "The drone is still standing.")
+	_check(int(judgement["points"]) > 0, "A successful snap shot still scores.")
+	_check(director.live_drones().is_empty(), "The shot destroys its target.")
 	director.free()
 
 
@@ -479,6 +480,7 @@ func _test_rhythm_mode_accepts_any_note() -> void:
 ## accessibility setting is decorative.
 func _test_window_scale_widens_the_hit() -> void:
 	var strict := _opened_director([_drone_plan(1, 40, 0.0, 2.0)])
+	strict.apply_mode(EncounterDirector.Mode.RHYTHM)
 	_run(strict, 1.68)
 	_check(
 		_kind(strict.resolve_note(4, 0)) == EncounterDirector.Judgement.NOISE,
@@ -487,6 +489,7 @@ func _test_window_scale_widens_the_hit() -> void:
 	strict.free()
 
 	var eased := _opened_director([_drone_plan(1, 40, 0.0, 2.0)])
+	eased.apply_mode(EncounterDirector.Mode.RHYTHM)
 	eased.window_scale = 1.4
 	_run(eased, 1.68)
 	_check(
@@ -530,6 +533,7 @@ func _test_plated_knuckle_needs_every_note() -> void:
 func _test_plated_knuckle_paces_its_plates() -> void:
 	var bot := PlatedKnuckle.new()
 	bot.configure_sequence(1, [40, 45], 2.0, 2.0, 0.5)
+	_check(bot.notes == [40, 45, 40], "A two-note phrase is cycled onto all three plates.")
 	_advance_drone(bot, 2.0)
 	_check(
 		absf(bot.time_to_beat()) <= STEP,
@@ -537,6 +541,7 @@ func _test_plated_knuckle_paces_its_plates() -> void:
 	)
 
 	bot.strike()
+	_check(bot.required_note == 45, "The second plate calls the authored second note.")
 	_check(
 		bot.time_to_beat() < -0.4,
 		"Breaking a plate pushes the next beat out by one interval."
@@ -546,23 +551,53 @@ func _test_plated_knuckle_paces_its_plates() -> void:
 		absf(bot.time_to_beat()) <= STEP * 2.0,
 		"And that beat arrives one interval later, got %.3f" % bot.time_to_beat()
 	)
+	_check(bot.strike(), "The second plate breaks on its own beat.")
+	_check(bot.required_note == 40, "The third plate cycles back to the first note.")
+	_check(bot.is_targetable(), "Two hits in is still not a kill.")
+	_check(
+		bot.time_to_beat() < -0.4,
+		"The third plate is paced by the same interval."
+	)
+	_advance_drone(bot, 0.5)
+	_check(
+		absf(bot.time_to_beat()) <= STEP * 2.0,
+		"And the third beat arrives one interval after the second."
+	)
 
 	# The wind-up has to cover the whole phrase, or the last plate is a coin
 	# flip against the fire frame.
 	_check(
 		not bot.advance(STEP, FIELD, EncounterDirector.LANE_COUNT),
-		"It has not fired while the phrase is still playable."
+		"It has not fired while the third plate is still playable."
 	)
+	_check(bot.strike(), "The last plate lands.")
+	_check(not bot.is_targetable(), "Only the third hit finally kills it.")
 	bot.free()
 
 
-func _test_plated_knuckle_falls_back_to_one_note() -> void:
-	var bot := PlatedKnuckle.new()
-	bot.configure_sequence(0, [], 2.0, 2.0)
-	_check(bot.plate_count() == 1, "An empty phrase is not an empty bot.")
-	_check(bot.strike(), "It can still be struck.")
-	_check(not bot.is_targetable(), "One note kills it.")
-	bot.free()
+func _test_plated_knuckle_normalizes_to_three_hits() -> void:
+	var bare := PlatedKnuckle.new()
+	bare.configure_sequence(0, [55], 2.0, 2.0)
+	_check(bare.notes == [55, 55, 55], "A bare note fills all three plates with itself.")
+	_check(bare.plate_count() == 3, "A plated phrase is always three hits.")
+	bare.free()
+
+	var trimmed := PlatedKnuckle.new()
+	trimmed.configure_sequence(0, [40, 45, 50, 55], 2.0, 2.0)
+	_check(
+		trimmed.notes == [40, 45, 50],
+		"A longer phrase keeps its first three notes and nothing past them."
+	)
+	trimmed.free()
+
+	var empty := PlatedKnuckle.new()
+	empty.configure_sequence(0, [], 2.0, 2.0, PlatedKnuckle.PLATE_SECONDS, 59)
+	_check(
+		empty.notes == [59, 59, 59],
+		"An empty runtime phrase can still reuse its authored fallback note."
+	)
+	_check(empty.required_note == 59, "The fallback note is called immediately.")
+	empty.free()
 
 	var widened := PlatedKnuckle.new()
 	widened.configure_sequence(0, [40, 45, 50], 2.0, 0.1)
@@ -661,7 +696,10 @@ func _test_director_spawns_the_charted_roster() -> void:
 		live[1] is PlatedKnuckle and live[1].roster_key() == "plated_knuckle",
 		"A plan that names an enemy stages that enemy."
 	)
-	_check(live[1].demand_size() == 2, "And it arrives carrying its phrase.")
+	_check(
+		live[1].demand_size() == 3,
+		"And it arrives carrying the fixed three-hit phrase."
+	)
 	director.free()
 
 
@@ -683,8 +721,14 @@ func _test_plate_hit_is_not_a_kill() -> void:
 	_check(director.live_drones().size() == 1, "The bot is still walking.")
 
 	_run(director, PlatedKnuckle.PLATE_SECONDS)
-	var last := director.resolve_note(9, 0)
-	_check(bool(last["killed"]), "The last note of the phrase kills.")
+	var second := director.resolve_note(9, 0)
+	_check(_kind(second) == EncounterDirector.Judgement.HIT, "The second plate scores too.")
+	_check(not bool(second["killed"]), "But two hits still are not a kill.")
+	_check(killed[0] == 0, "No kill is announced before the third plate.")
+
+	_run(director, PlatedKnuckle.PLATE_SECONDS)
+	var last := director.resolve_note(4, 0)
+	_check(bool(last["killed"]), "The third note of the phrase kills.")
 	_check(killed[0] == 1, "And that kill is announced exactly once.")
 	director.free()
 
