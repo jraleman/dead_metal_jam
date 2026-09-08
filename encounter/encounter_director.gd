@@ -470,6 +470,7 @@ func resolve_note(
 	var points := note_points(tier, streak, cents_off, exact)
 	var shot_position := target.aim_point()
 	var shot_scale := target.scale.x
+	var shot_ground := target.position
 	# `strike()`, not `kill()`: most of the roster dies to one note, but a
 	# [PlatedKnuckle] breaks one plate and keeps aiming. Asking the bot what a
 	# correct note does to it is what let the roster grow without the matching
@@ -483,6 +484,7 @@ func resolve_note(
 	var judgement := _judgement(Judgement.HIT, tier, target, error, points, killed)
 	judgement["shot_position"] = shot_position
 	judgement["shot_scale"] = shot_scale
+	judgement["shot_ground"] = shot_ground
 	if killed:
 		drone_killed.emit(target, judgement)
 	return judgement
@@ -715,7 +717,7 @@ func _spawn(plan: Dictionary) -> void:
 func _free_firing_slot(lane: int) -> int:
 	var occupied: Array[int] = []
 	for drone in _drones:
-		if is_instance_valid(drone) and drone.lane == lane and not drone.is_finished():
+		if is_instance_valid(drone) and drone.lane == lane and drone.occupies_firing_slot():
 			occupied.append(drone.firing_slot)
 	var slot := 0
 	while occupied.has(slot):

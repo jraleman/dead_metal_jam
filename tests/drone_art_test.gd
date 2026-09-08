@@ -16,6 +16,10 @@ func _init() -> void:
 func _run() -> void:
 	_test_art_bounds()
 	_test_live_clanky_pose()
+	_test_cannon_charge_effects()
+	_test_destroyed_parts()
+	_test_destruction_presentation_speed()
+	_test_quiet_destruction()
 	_test_plate_cursor()
 	_test_scale_does_not_change_the_beat()
 	_test_demo_freezes_the_drawing()
@@ -69,8 +73,8 @@ func _test_live_clanky_pose() -> void:
 	_check(not art.walking, "A winding-up bot stops walking.")
 	drone.kill()
 	_check(art.defeated and not art.targeted, "A killed bot changes its pose and drops its target brackets.")
-	drone.advance(JamBot.DEATH_FADE * 0.5, FIELD, 3)
-	_check(is_equal_approx(art.self_modulate.a, 0.5), "The whole character shares the existing death fade.")
+	drone.advance(JamBot.QUIET_DEATH_FADE * 0.5, FIELD, 3)
+	_check(is_equal_approx(art.self_modulate.a, 0.5), "Reduced motion keeps the original short, simple fade.")
 	drone.free()
 
 
@@ -106,6 +110,120 @@ func _test_plate_cursor() -> void:
 		"Reconfiguring restores all three plates, cycling shorter phrases without losing accidentals."
 	)
 	drone.free()
+
+
+func _test_destroyed_parts() -> void:
+	var drones: Array[JamBot] = [RustyClanky.new(), PlatedKnuckle.new()]
+	for drone in drones:
+		if drone is PlatedKnuckle:
+			drone.configure_sequence(1, [48, 52, 55], 3.0, 3.0)
+			drone.strike()
+		else:
+			drone.configure(1, 52, 3.0, 3.0)
+		drone.advance(0.4, FIELD, 3)
+		var art: DmjDroneArt = drone.get_node("Art")
+		var pivot := Vector2(0.0, -66.0)
+		_check(
+			art.fragment_transform(pivot, Vector2(-38.0, -180.0), -3.2).is_equal_approx(Transform2D.IDENTITY),
+			"Live drones and nonlethal armor hits never split the artwork into fragments."
+		)
+		for hit in range(drone.demand_size()):
+			drone.strike()
+		drone.advance_feedback(0.35)
+		var head := art.fragment_transform(pivot, Vector2(-38.0, -180.0), -3.2)
+		var arm := art.fragment_transform(Vector2(55.0, 8.0), Vector2(150.0, -70.0), 5.0)
+		_check(
+			not head.is_equal_approx(Transform2D.IDENTITY) and not head.origin.is_equal_approx(arm.origin),
+			"Destroyed heads and arms move independently rather than shrinking as one sprite."
+		)
+		_check(absf(head.get_rotation()) > 0.8, "The flying head visibly tumbles during the breakup.")
+		_check(
+			art.self_modulate.a > 0.99 and art.destruction_age > 0.3,
+			"The chassis stays opaque long enough to read its destruction animation."
+		)
+		_check(
+			not drone.is_targetable() and not drone.occupies_firing_slot() and not drone.is_finished(),
+			"Animated wreckage is visible but cannot score twice or occupy a firing bay."
+		)
+		drone.advance_feedback(0.3)
+		_check(
+			art.self_modulate.a > 0.0 and art.self_modulate.a < 1.0,
+			"Broken parts fade only after their initial flight is visible."
+		)
+		drone.set_reduced_motion(true)
+		_check(
+			is_zero_approx(art.destruction_age) and drone.is_finished(),
+			"Changing reduced motion immediately retires an ongoing breakup."
+		)
+		drone.set_reduced_motion(false)
+		_check(is_zero_approx(art.destruction_age), "Restoring motion cannot replay an old death animation.")
+		drone.configure(1, 52, 3.0, 3.0)
+		_check(
+			not art.defeated and is_zero_approx(art.destruction_age) and is_equal_approx(art.self_modulate.a, 1.0),
+			"Reconfiguring an actor clears its destruction pose and opacity."
+		)
+		drone.free()
+
+
+func _test_destruction_presentation_speed() -> void:
+	for speed in [0.5, 1.0, 2.0]:
+		var drone := RustyClanky.new()
+		drone.configure(1, 52, 3.0, 3.0)
+		drone.presentation_speed = speed
+		drone.kill()
+		drone.advance(JamBot.DEATH_FADE * 0.5 * speed, FIELD, 3)
+		var art: DmjDroneArt = drone.get_node("Art")
+		_check(
+			is_equal_approx(art.destruction_age, JamBot.DEATH_FADE * 0.5) and not drone.is_finished(),
+			"Changing song speed does not shorten or stretch the destruction presentation."
+		)
+		drone.advance(JamBot.DEATH_FADE * 0.51 * speed, FIELD, 3)
+		_check(drone.is_finished() and is_zero_approx(art.self_modulate.a), "A complete breakup retires at every song speed.")
+		drone.free()
+
+
+func _test_quiet_destruction() -> void:
+	for reduced in [true, false]:
+		var drone := RustyClanky.new()
+		drone.configure(1, 52, 3.0, 3.0)
+		drone.set_reduced_motion(reduced)
+		drone.set_effects_enabled(reduced)
+		drone.kill()
+		drone.advance_feedback(JamBot.QUIET_DEATH_FADE * 0.5)
+		var art: DmjDroneArt = drone.get_node("Art")
+		_check(
+			is_zero_approx(art.destruction_age) and is_equal_approx(art.self_modulate.a, 0.5),
+			"Reduced motion and disabled effects both keep the short fade without flying parts."
+		)
+		drone.set_reduced_motion(false)
+		drone.set_effects_enabled(true)
+		_check(is_zero_approx(art.destruction_age), "Enabling effects cannot animate a kill that happened with them disabled.")
+		drone.advance_feedback(JamBot.QUIET_DEATH_FADE)
+		_check(drone.is_finished() and not drone.is_processing(), "Quiet destruction releases its feedback clock promptly.")
+		drone.free()
+
+
+func _test_cannon_charge_effects() -> void:
+	var art := DmjRustyClankyArt.new()
+	art.combat_pose = true
+	art.charge = 0.4
+	_check(is_zero_approx(art._charge_energy()), "Idle cannons do not advertise an imminent shot.")
+	art.charge = 0.8
+	var energy := art._charge_energy()
+	_check(energy > 0.0 and energy < 1.0, "Cannon arcs build from the real attack progress.")
+	art.charge = 1.0
+	_check(is_equal_approx(art._charge_energy(), 1.0), "The cannon reaches full energy at its firing deadline.")
+	art.reduced_motion = true
+	_check(is_zero_approx(art._charge_energy()), "Reduced motion suppresses orbiting charge effects.")
+	_check(not art._effects_active(), "Reduced motion also suppresses the enemy muzzle flash.")
+	art.reduced_motion = false
+	art.effects_enabled = false
+	_check(is_zero_approx(art._charge_energy()), "The effects setting also suppresses cannon arcs.")
+	_check(not art._effects_active(), "Discharge flashes use the same effects gate as cannon arcs.")
+	art.effects_enabled = true
+	art.defeated = true
+	_check(is_zero_approx(art._charge_energy()), "Destroyed robots cannot retain charging energy.")
+	art.free()
 
 
 func _test_scale_does_not_change_the_beat() -> void:

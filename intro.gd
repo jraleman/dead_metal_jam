@@ -245,7 +245,9 @@ func _cue_answer(index: int) -> void:
 	AudioManager.request_caption(
 		"%s lands — drone down" % PitchDetector.note_name(DRONE_NOTES[index])
 	)
-	_shots.player_shot(drone.aim_point(), true, DRONE_NOTES[index], drone.scale.x)
+	_shots.player_shot(
+		drone.aim_point(), true, DRONE_NOTES[index], drone.scale.x, drone.position
+	)
 	_add_shake(5.0)
 	_flash_screen(0.1)
 	if _intense_effects and not _reduced_motion:
@@ -339,7 +341,8 @@ func _advance_shake(delta: float) -> void:
 func _flash_screen(alpha: float) -> void:
 	if _flash_tween and _flash_tween.is_valid():
 		_flash_tween.kill()
-	if not _intense_effects:
+	if not _intense_effects or _reduced_motion:
+		_flash_tween = null
 		_flash.color.a = 0.0
 		return
 	_flash.color.a = alpha

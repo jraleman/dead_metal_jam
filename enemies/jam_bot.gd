@@ -61,8 +61,8 @@ const DEPTH_FOG := Color("9c8871")
 ## is being asked for, so distance may cost it contrast but never legibility.
 const FOG_STRENGTH := 0.7
 
-## How long a killed drone stays on screen fading out.
-const DEATH_FADE := 0.22
+const DEATH_FADE := DmjDroneArt.DESTRUCTION_SECONDS
+const QUIET_DEATH_FADE := 0.22
 
 ## How long the muzzle flash of a drone that fired stays up (§5.2).
 const FIRED_FADE := 0.34
@@ -98,6 +98,7 @@ var _targeted := false
 var _reduced_motion := false
 var _effects_enabled := true
 var _feedback_age := -1.0
+var _death_animated := false
 var _art: DmjDroneArt
 ## Seconds added to this bot's beat by its own progress. Zero for anything that
 ## dies to one note; a plate broken by [PlatedKnuckle] pushes the next beat out
@@ -119,7 +120,7 @@ func advance_feedback(delta: float) -> void:
 		return
 	_feedback_age += delta
 	_sync_art()
-	if _feedback_age >= 0.28:
+	if _feedback_age >= (_death_duration() if state == State.DEAD else 0.28):
 		set_process(false)
 
 
@@ -149,6 +150,7 @@ func configure(
 	_beat_offset = 0.0
 	_targeted = false
 	_feedback_age = -1.0
+	_death_animated = false
 	set_process(false)
 	_sync_art()
 
@@ -170,7 +172,7 @@ func advance(delta: float, field: Rect2, lane_count: int) -> bool:
 		State.FIRED:
 			_fired_elapsed += delta
 		State.DEAD:
-			_dead_elapsed += delta
+			_dead_elapsed += delta / maxf(presentation_speed, 0.1)
 
 	_place(field, lane_count)
 	_sync_art()
@@ -184,6 +186,7 @@ func kill() -> bool:
 		return false
 	state = State.DEAD
 	_dead_elapsed = 0.0
+	_death_animated = _effects_enabled and not _reduced_motion
 	react_to_hit()
 	return true
 
@@ -208,10 +211,23 @@ func on_wrong_note() -> void:
 ## True once the bot has finished its exit animation and can be freed.
 func is_finished() -> bool:
 	if state == State.DEAD:
-		return _dead_elapsed >= DEATH_FADE
+		return _death_age() >= _death_duration()
 	if state == State.FIRED:
 		return _fired_elapsed >= FIRED_FADE
 	return false
+
+
+func occupies_firing_slot() -> bool:
+	# A longer cosmetic breakup must not keep a newly arriving bot out of its bay.
+	return _death_age() < QUIET_DEATH_FADE if state == State.DEAD else not is_finished()
+
+
+func _death_age() -> float:
+	return maxf(_dead_elapsed, maxf(_feedback_age, 0.0))
+
+
+func _death_duration() -> float:
+	return DEATH_FADE if _death_animated else QUIET_DEATH_FADE
 
 
 ## True while the bot can still be shot.
@@ -297,11 +313,15 @@ func set_targeted(value: bool) -> void:
 
 func set_reduced_motion(enabled: bool) -> void:
 	_reduced_motion = enabled
+	if enabled:
+		_death_animated = false
 	_sync_art()
 
 
 func set_effects_enabled(enabled: bool) -> void:
 	_effects_enabled = enabled
+	if not enabled:
+		_death_animated = false
 	_sync_art()
 
 
@@ -330,6 +350,12 @@ func _place(field: Rect2, lane_count: int) -> void:
 		position.x += side * 30.0 * visual_scale * (1.0 - entry)
 	var depth_scale := lerpf(0.80, 1.0, depth)
 	scale = Vector2.ONE * depth_scale * visual_scale
+	if _art != null:
+		var margin := BODY_SIZE.x * 0.5 + 12.0
+		_art.destruction_x_limits = Vector2(
+			minf((field.position.x - position.x) / maxf(scale.x, 0.1) + margin, 0.0),
+			maxf((field.end.x - position.x) / maxf(scale.x, 0.1) - margin, 0.0)
+		)
 	# Back-row bays are slightly hazier without sacrificing note contrast.
 	modulate = Color.WHITE.lerp(DEPTH_FOG, (1.0 - depth) * FOG_STRENGTH * 0.5)
 	# Nearer bots draw over further ones, which is the whole depth cue.
@@ -363,17 +389,19 @@ func _sync_art() -> void:
 	_art.target_color = DmjPalette.note_color(required_note)
 	_art.rotation = 0.0
 	_art.scale = Vector2.ONE
-	var death_age := maxf(_dead_elapsed, maxf(_feedback_age, 0.0))
+	var death_age := _death_age()
+	_art.destruction_age = death_age if state == State.DEAD and _death_animated else 0.0
 	var reaction := maxf(1.0 - _feedback_age / 0.24, 0.0) if _feedback_age >= 0.0 else 0.0
 	_art.hit_flash = (
 		maxf(1.0 - _feedback_age / 0.09, 0.0)
-		if _feedback_age >= 0.0 and _effects_enabled and not _reduced_motion else 0.0
+		if _feedback_age >= 0.0 and _effects_enabled and not _reduced_motion
+		and (state != State.DEAD or _death_animated) else 0.0
 	)
 	if _effects_enabled and not _reduced_motion:
 		if state == State.DEAD:
-			var collapse := clampf(death_age / DEATH_FADE, 0.0, 1.0)
-			_art.rotation = collapse * (-0.16 if lane % 2 == 0 else 0.16)
-			_art.scale = Vector2(1.0 + collapse * 0.12, 1.0 - collapse * 0.65)
+			var kick := sin(clampf(death_age / 0.12, 0.0, 1.0) * PI) if _death_animated else 0.0
+			_art.rotation = kick * (-0.08 if lane % 2 == 0 else 0.08)
+			_art.scale = Vector2(1.0 + kick * 0.12, 1.0 - kick * 0.16)
 		elif reaction > 0.0:
 			_art.rotation = sin(_feedback_age * 42.0) * reaction * 0.055
 			_art.scale = Vector2(1.0 + reaction * 0.05, 1.0 - reaction * 0.06)
@@ -385,7 +413,10 @@ func _sync_art() -> void:
 		_art.set_phrase(phrase, cursor)
 	var alpha := 1.0
 	if state == State.DEAD:
-		alpha = 1.0 - clampf(death_age / DEATH_FADE, 0.0, 1.0)
+		alpha = (
+			1.0 - smoothstep(DmjDroneArt.DESTRUCTION_FADE_START, DEATH_FADE, death_age)
+			if _death_animated else 1.0 - clampf(death_age / QUIET_DEATH_FADE, 0.0, 1.0)
+		)
 	elif state == State.FIRED:
 		alpha = 1.0 - clampf(_fired_elapsed / FIRED_FADE, 0.0, 1.0) * 0.7
 	_art.self_modulate.a = alpha

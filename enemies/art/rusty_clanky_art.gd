@@ -10,10 +10,25 @@ func visual_bounds() -> Rect2:
 
 
 func _draw_character() -> void:
-	_draw_leg(-1.0, 0.0)
-	_draw_leg(1.0, PI)
-	_draw_arm(-1.0, 0.0)
-	_draw_arm(1.0, PI)
+	for side in [-1.0, 1.0]:
+		draw_set_transform_matrix(fragment_transform(
+			Vector2(side * 23.0, 72.0), Vector2(side * 95.0, -90.0), -side * 3.6, 32.0
+		))
+		_draw_leg(side, 0.0 if side < 0.0 else PI)
+	for side in [-1.0, 1.0]:
+		draw_set_transform_matrix(fragment_transform(
+			Vector2(side * 49.0, 8.0), Vector2(side * 150.0, -70.0), side * 5.0, 42.0
+		))
+		_draw_arm(side, 0.0 if side < 0.0 else PI)
+	draw_set_transform_matrix(fragment_transform(
+		Vector2(0.0, 12.0), Vector2(18.0, -40.0), 2.8, 58.0
+	))
+	_draw_body()
+	_draw_head()
+	draw_set_transform(Vector2.ZERO)
+
+
+func _draw_body() -> void:
 	for x in [-11.0, 0.0, 12.0]:
 		_limb(Vector2(x, -48.0), Vector2(x, -27.0), 5.0, METAL)
 
@@ -27,18 +42,18 @@ func _draw_character() -> void:
 	]), RUST_DARK)
 	draw_line(Vector2(-27.0, -26.0), Vector2(32.0, -28.0), RUST_LIGHT, 2.0, true)
 	_box(Rect2(-28.0, 42.0, 58.0, 10.0), METAL_DARK)
-	_note_plate(Rect2(-29.0, -22.0, 60.0, 64.0), current_note())
+	_note_plate(Rect2(-29.0, -22.0, 60.0, 64.0), current_note(), not defeated, defeated)
 	for corner: Vector2 in [
 		Vector2(-34.0, -23.0), Vector2(34.0, -24.0),
 		Vector2(-32.0, 39.0), Vector2(35.0, 38.0),
 	]:
 		_rivet(corner, 1.7)
-	_draw_head()
 
 
 func _draw_head() -> void:
 	var aim_tilt := _wave(2.4) * 0.015 if combat_pose and not defeated else 0.0
-	draw_set_transform(Vector2(0.0, -66.0), _stride(0.018) + aim_tilt)
+	var head := fragment_transform(Vector2(0.0, -66.0), Vector2(-38.0, -180.0), -3.2, 42.0)
+	draw_set_transform_matrix(head * Transform2D(_stride(0.018) + aim_tilt, Vector2(0.0, -66.0)))
 	_panel(PackedVector2Array([
 		Vector2(-25.0, -20.0), Vector2(-25.0, -35.0),
 		Vector2(-14.0, -32.0), Vector2(-15.0, -19.0),

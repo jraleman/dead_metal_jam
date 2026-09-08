@@ -78,6 +78,20 @@ The concept-based drone artwork is described in section 8.4; encounter rules
 remain unchanged by those earlier presentation passes. The subsequent arcade
 revision below intentionally changes Jam's timing gate and enemy movement.
 
+The dimensional effects pass adds beveled surfaces, feathered stage lighting,
+bounded drifting dust, foreground parallax and animated turbine/reactor detail.
+Kills combine a fast-growing, sustained bright fireball and additive glow with
+a 0.9-second articulated breakup: heads, limbs and armor plates travel and spin
+independently before fading. Perspective-scaled debris and smoke linger behind
+them; floor shockwaves use a captured foot position and render underneath the
+actors. Wreckage does not delay waves or reserve firing bays beyond the original
+short exit interval. Results leave time for the final breakup, while reduced
+motion keeps a short static fade. Impact labels stay above the debris. This is
+still procedural 2D
+drawing, not a `Node3D` scene or a renderer-dependent post-process. Decorative
+motion follows the encounter clock and accessibility switches; shot feedback
+retains its separate presentation clock without changing judgement or damage.
+
 ---
 
 ## 2. Core gameplay loop

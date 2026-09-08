@@ -53,6 +53,7 @@ func _initialize() -> void:
 	_test_last_advance_gets_its_own_line()
 	_test_combo_charge_boundaries()
 	_test_rail_effects_can_be_cleared()
+	_test_atmosphere_and_parallax()
 	_test_console_scene.call_deferred()
 
 
@@ -445,6 +446,40 @@ func _test_console_scene() -> void:
 	values.clear()
 	values.merge(saved, true)
 	_finish.call_deferred()
+
+
+func _test_atmosphere_and_parallax() -> void:
+	var rail := DmjRail.new()
+	rail.update_rail(0.0, FIELD, 3, false)
+	var initial := rail._mote_position(2)
+	rail.update_rail(0.5, FIELD, 3, false)
+	var moved := rail._mote_position(2)
+	_check(not moved.is_equal_approx(initial), "Dust drifts through the stage lighting.")
+	rail.update_rail(0.0, FIELD, 3, false)
+	_check(rail._mote_position(2).is_equal_approx(moved), "Demo's zero step freezes atmospheric motion.")
+	var time: float = rail.get("_motion_time")
+	rail.set_reduced_motion(true)
+	rail.update_rail(1.0, FIELD, 3, false)
+	_check(
+		is_equal_approx(float(rail.get("_motion_time")), time) and is_zero_approx(rail._decorative_time()),
+		"Reduced motion holds machinery and light shafts in a stable presentation."
+	)
+	rail.set_reduced_motion(false)
+	rail.set_effects_enabled(false)
+	rail.update_rail(1.0, FIELD, 3, false)
+	_check(is_zero_approx(rail._decorative_time()), "Disabled effects also stop decorative machinery.")
+	rail.set_effects_enabled(true)
+	var bob := Vector2(2.0, -3.0)
+	rail.update_rail(0.0, FIELD, 3, false, bob)
+	_check(
+		(rail._p(0.0, 0.5, 1.5) - rail._p(0.0, 0.5)).is_equal_approx(bob * 0.5),
+		"Foreground framing moves more than the room without moving its firing bays."
+	)
+	for field: Rect2 in [FIELD, Rect2(15, 90, 280, 180), Rect2(20, 180, 1500, 280)]:
+		rail.update_rail(123.0, field, 3, false)
+		for mote in range(DmjRail.AMBIENT_MOTES):
+			_check(field.has_point(rail._mote_position(mote)), "Decorative motes remain inside every playfield size.")
+	rail.free()
 
 
 ## A round is on screen before it is advancing: behind the router's fade, and

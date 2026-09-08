@@ -24,6 +24,9 @@ func _run() -> void:
 	_test_note_colors()
 	_test_hit_reactions()
 	_test_particle_feedback()
+	_test_projected_feedback()
+	_test_explosion_readability()
+	_test_breakup_does_not_hold_bays()
 	await _test_gameplay_shots()
 	_finish.call_deferred()
 
@@ -167,6 +170,7 @@ func _test_plate_impact_position() -> void:
 	_advance(director, 0.4)
 	var drone := director.live_drones()[0]
 	var before := drone.aim_point()
+	var ground := drone.position
 	var hit := director.resolve_note(0, 0)
 	var impact: Vector2 = hit["shot_position"]
 	_check(
@@ -176,6 +180,10 @@ func _test_plate_impact_position() -> void:
 	_check(
 		not drone.aim_point().is_equal_approx(before) and drone.required_note == 52,
 		"The next note targets the next plate without moving the previous impact."
+	)
+	_check(
+		(hit["shot_ground"] as Vector2).is_equal_approx(ground) and ground.y > impact.y,
+		"Ground feedback records the planted feet, not the struck shoulder plate."
 	)
 	director.free()
 
@@ -239,6 +247,12 @@ func _test_gameplay_shots() -> void:
 	var save_timer: Timer = settings.get("_save_timer")
 	var save_mode := save_timer.process_mode
 	save_timer.process_mode = Node.PROCESS_MODE_DISABLED
+	# Exercising results must not grant achievements to the local player's profile.
+	var achievements := get_root().get_node("AchievementManager")
+	var unlocked: Dictionary = achievements.get("_unlocked")
+	var saved_unlocks := unlocked.duplicate(true)
+	for id: String in achievements.get("_definitions"):
+		unlocked[id] = "test"
 	values.merge({
 		DmjOptions.NOTE_SOURCE_KEY: DmjOptions.SOURCE_KEYBOARD,
 		DmjOptions.MODE_KEY: DmjOptions.MODE_JAM,
@@ -262,6 +276,19 @@ func _test_gameplay_shots() -> void:
 		fx.set_process(false)
 		var director: EncounterDirector = game.get("_director")
 		var router: NoteRouter = game.get("_router")
+		var flash: ColorRect = game.get("_screen_flash")
+		game.call("_set_intense_effects_enabled", true)
+		game.call("_set_reduced_motion_enabled", false)
+		game.call("_flash_screen", DmjPalette.AMBER, 0.12)
+		_check(flash.color.a > 0.0, "Normal presentation retains its impact flash.")
+		game.call("_set_reduced_motion_enabled", true)
+		_check(
+			is_zero_approx(flash.color.a) and game.get("_flash_tween") == null,
+			"Enabling reduced motion clears an in-flight full-screen flash immediately."
+		)
+		game.call("_flash_screen", DmjPalette.DANGER, 0.2)
+		_check(is_zero_approx(flash.color.a), "New notes and damage cannot flash the screen under reduced motion.")
+		game.call("_set_intense_effects_enabled", false)
 		director.set_track([{"drones": [
 			{"enemy": "plated_knuckle", "lane": 1, "notes": [48, 52, 55],
 				"at": 0.0, "approach": 3.0, "windup": 3.0},
@@ -289,6 +316,11 @@ func _test_gameplay_shots() -> void:
 			and director.live_drones()[0].required_note == 52
 			and shots.back()["color"] == DmjPalette.note_color(48),
 			"A real musical input produces a plate-hit tracer and advances the phrase."
+		)
+		var ground: Vector2 = fx.call("_point", shots.back()["ground"])
+		_check(
+			ground.is_equal_approx(director.live_drones()[0].position),
+			"The real gameplay path supplies the floor position for the impact light."
 		)
 		game.call("_update_target_readout")
 		_check(
@@ -340,6 +372,7 @@ func _test_gameplay_shots() -> void:
 		_check(not bool(game.get("_round_active")), "The feedback delay settles the round without a timer callback.")
 		game.call("_on_play_again_pressed")
 		_check(fx.active_count() == 0, "Replay leaves no previous-round bullets or callbacks.")
+		_test_final_kill_settle(game)
 		game.set("_round_active", false)
 		game.call("_finish_round")
 		game.queue_free()
@@ -351,6 +384,51 @@ func _test_gameplay_shots() -> void:
 	values.merge(saved, true)
 	save_timer.stop()
 	save_timer.process_mode = save_mode
+	unlocked.clear()
+	unlocked.merge(saved_unlocks, true)
+
+
+func _test_final_kill_settle(game: Node) -> void:
+	game.call("_set_reduced_motion_enabled", false)
+	game.call("_set_intense_effects_enabled", true)
+	var director: EncounterDirector = game.get("_director")
+	var fx: DmjShotFx = game.get("_shot_fx")
+	var router: NoteRouter = game.get("_router")
+	director.set_track([{"advance": 0.0, "drones": [_plan(1, 52, 0.0, 3.0, 2.0)]}])
+	director.begin()
+	game.call("_update_round", STEP, 60.0)
+	var drone := director.live_drones()[0]
+	router.note_started.emit(NoteEvent.make(52, NoteEvent.Source.KEYBOARD))
+	fx.set_process(false)
+	game.call("_update_round", STEP, 60.0)
+	var hold: float = game.get("_ending_left")
+	_check(hold >= JamBot.DEATH_FADE, "Results reserve enough presentation time for the final drone's breakup.")
+	for frame in range(ceili(0.45 / STEP)):
+		fx.advance(STEP)
+		drone.advance_feedback(STEP)
+		game.call("_update_round", STEP, 60.0)
+	var art: DmjDroneArt = drone.get_node("Art")
+	_check(
+		bool(game.get("_round_active")) and art.destruction_age > 0.4 and art.self_modulate.a > 0.9,
+		"The last drone visibly breaks apart rather than disappearing behind results."
+	)
+	var age := art.destruction_age
+	director.refresh_layout(Rect2(0.0, 0.0, 320.0, 180.0))
+	game.call("_update_round", 0.0, 60.0)
+	var field: Rect2 = game.call("_playfield_bounds")
+	var room: Rect2 = director.get_node("Rail").get("_field")
+	_check(
+		room.is_equal_approx(field) and is_equal_approx(art.destruction_age, age),
+		"Pending results still fit the room to the viewport without advancing the breakup clock."
+	)
+	for frame in range(ceili(hold / STEP) + 2):
+		if not bool(game.get("_round_active")):
+			break
+		fx.advance(STEP)
+		if not drone.is_queued_for_deletion():
+			drone.advance_feedback(STEP)
+		game.call("_update_round", STEP, 60.0)
+	_check(not bool(game.get("_round_active")), "The longer kill presentation still settles the round exactly once.")
 
 
 func _test_note_colors() -> void:
@@ -412,6 +490,8 @@ func _test_particle_feedback() -> void:
 	fx.miss()
 	_check((fx.get("_particles") as Array).is_empty(), "Disabled effects keep only essential static feedback.")
 	fx.set_presentation_options(false, true)
+	for shot: Dictionary in fx.get("_shots"):
+		_check(not bool(shot["animated"]), "Restoring effects never replays an old explosion or moving tracer.")
 	for _index in range(100):
 		fx.player_shot(FIELD.get_center(), true, 67)
 	_check(
@@ -419,12 +499,76 @@ func _test_particle_feedback() -> void:
 		and fx.active_count() <= DmjShotFx.MAX_SHOTS,
 		"Dense musical input stays within both effect budgets."
 	)
-	fx.advance(DmjShotFx.LIFETIME + 0.01)
+	fx.advance(DmjShotFx.DESTRUCTION_LIFETIME + 0.01)
 	_check((fx.get("_particles") as Array).is_empty() and not fx.is_processing(), "Expired particles stop processing and release their records.")
 	fx.player_shot(FIELD.get_center(), true, 48)
 	fx.clear()
 	_check((fx.get("_particles") as Array).is_empty() and fx.active_count() == 0, "Replay clears particle trails and shots together.")
 	fx.free()
+
+
+func _test_projected_feedback() -> void:
+	var fx := DmjShotFx.new()
+	var repeat := DmjShotFx.new()
+	get_root().add_child(fx)
+	get_root().add_child(repeat)
+	var target := FIELD.position + FIELD.size * Vector2(0.3, 0.45)
+	var ground := FIELD.position + FIELD.size * Vector2(0.3, 0.75)
+	for effect in [fx, repeat]:
+		effect.set_field(FIELD)
+		effect.player_shot(target, true, 55, 0.8, ground)
+	_check(
+		fx.get("_particles") == repeat.get("_particles"),
+		"Identical shots produce deterministic debris without touching the global random stream."
+	)
+	var layer := fx.get_node("GroundEffects") as Node2D
+	_check(
+		layer.z_index + fx.z_index == 0,
+		"Ground shockwaves render between the room and the depth-sorted actors."
+	)
+	fx.advance(0.2)
+	var near := false
+	var far := false
+	for particle: Dictionary in fx.get("_particles"):
+		var perspective: float = fx.call("_particle_perspective", particle)
+		_check(is_finite(perspective) and perspective > 0.0, "Projected debris cannot cross a perspective singularity.")
+		near = near or perspective > 1.01
+		far = far or perspective < 0.99
+	_check(near and far, "An explosion throws fragments both toward and away from the camera.")
+
+	var shot: Dictionary = (fx.get("_shots") as Array)[0]
+	for field: Rect2 in [FIELD, Rect2(15, 40, 260, 180), Rect2(30, 180, 1500, 280)]:
+		fx.set_field(field)
+		var projected: Vector2 = fx.call("_point", shot["ground"])
+		_check(
+			projected.is_equal_approx(field.position + field.size * Vector2(0.3, 0.75)),
+			"Floor impacts remain attached to their normalized position after resizing."
+		)
+		for point: Vector2 in [projected, field.position + Vector2(4, 4), field.end - Vector2(4, 4)]:
+			var radius: float = fx.call("_ground_radius", point, 110.0)
+			var extent := Vector2(radius, radius * DmjShotFx.GROUND_SQUASH)
+			_check(
+				field.encloses(Rect2(point - extent, extent * 2.0)),
+				"A projected shockwave cannot spill into the HUD, including at field edges."
+			)
+	fx.set_presentation_options(true, true)
+	_check(
+		not bool(shot["animated"]) and (fx.get("_particles") as Array).is_empty(),
+		"Changing reduced motion immediately retires dimensional effects but retains their outcome."
+	)
+	fx.set_presentation_options(false, true)
+	fx.player_shot(target, false, 48, 1.0, ground)
+	_check(
+		bool((fx.get("_shots") as Array).back()["animated"]),
+		"New notes can animate again after the player restores effects."
+	)
+	fx.clear()
+	_check(
+		fx.active_count() == 0 and not fx.is_processing(),
+		"Clearing a round also releases the records driving the ground pass."
+	)
+	fx.free()
+	repeat.free()
 
 
 func _opened(plans: Array) -> EncounterDirector:
@@ -434,6 +578,86 @@ func _opened(plans: Array) -> EncounterDirector:
 	director.begin()
 	_advance(director, EncounterDirector.RAIL_ADVANCE_SECONDS + STEP)
 	return director
+
+
+func _test_explosion_readability() -> void:
+	var fx := DmjShotFx.new()
+	get_root().add_child(fx)
+	fx.set_field(FIELD)
+	fx.player_shot(FIELD.get_center(), true, 52, 1.0, FIELD.position + FIELD.size * Vector2(0.5, 0.8))
+	_check(
+		fx._blast_radius(0.12, 1.0) * 2.0 >= DmjDroneArt.SIZE.y,
+		"A kill blast grows to a drone-sized footprint within 120 ms."
+	)
+	_check(
+		fx._blast_heat(0.35) >= 0.8 and DmjShotFx.BURST_SECONDS >= 0.8,
+		"The bright core stays readable after the old explosion would already be fading away."
+	)
+	var glow := fx.get_node("BlastGlow") as Node2D
+	var material := glow.material as CanvasItemMaterial
+	_check(
+		material.blend_mode == CanvasItemMaterial.BLEND_MODE_ADD and glow.z_index < 0,
+		"Additive blast light stays behind the shot labels and foreground sparks."
+	)
+	_check(fx.result_settle_seconds() >= JamBot.DEATH_FADE, "A final kill allows time for the full drone animation.")
+	fx.advance(0.5)
+	_check(
+		is_equal_approx(fx.result_settle_seconds(), DmjShotFx.KILL_SETTLE - 0.5),
+		"Results wait only for the remaining animation, not a fresh full delay."
+	)
+	fx.advance(DmjShotFx.LIFETIME + 0.01 - 0.5)
+	_check(
+		fx.active_count() == 1 and not (fx.get("_particles") as Array).is_empty(),
+		"Destruction smoke and debris outlast the ordinary tracer lifetime."
+	)
+	fx.set_presentation_options(true, true)
+	_check(
+		is_equal_approx(fx.result_settle_seconds(), DmjShotFx.RESULT_SETTLE),
+		"Reduced motion keeps the original short results interval."
+	)
+	fx.clear()
+	fx.set_presentation_options(false, true)
+	fx.player_shot(FIELD.get_center(), false, 48)
+	_check(
+		is_equal_approx(fx.result_settle_seconds(), DmjShotFx.RESULT_SETTLE),
+		"A nonlethal armor hit is not treated as a long destruction animation."
+	)
+	fx.advance(DmjShotFx.LIFETIME + 0.01)
+	_check(fx.active_count() == 0, "Nonlethal feedback keeps its original duration.")
+	fx.free()
+
+
+func _test_breakup_does_not_hold_bays() -> void:
+	var director := EncounterDirector.new()
+	get_root().add_child(director)
+	director.set_track([
+		{"advance": 0.0, "drones": [_plan(1, 52, 0.0, 3.0, 2.0)]},
+		{"advance": 0.3, "drones": [_plan(1, 52, 0.0, 3.0, 2.0)]},
+	])
+	director.begin()
+	director.advance(STEP, FIELD)
+	var destroyed := director.live_drones()[0]
+	director.resolve_note(4, 0)
+	director.advance(STEP, FIELD)
+	_check(
+		director.phase() == EncounterDirector.Phase.ADVANCING,
+		"A visible breakup does not hold its cleared wave open."
+	)
+	_advance(director, 0.34)
+	var live := director.live_drones()
+	_check(
+		live.size() == 1 and live[0] != destroyed and live[0].firing_slot == 0,
+		"The next wave keeps its original firing bay while the old chassis is breaking apart."
+	)
+	var art: DmjDroneArt = destroyed.get_node("Art")
+	_check(
+		not destroyed.is_finished() and art.destruction_age > 0.3 and art.self_modulate.a > 0.9,
+		"Destruction remains visible alongside a newly arriving target."
+	)
+	destroyed.advance_feedback(JamBot.DEATH_FADE + 0.01)
+	director.advance(0.0, FIELD)
+	_check(destroyed.is_queued_for_deletion(), "Expired breakup actors are cleaned up even with a zero world step.")
+	director.free()
 
 
 func _advance(director: EncounterDirector, seconds: float) -> void:

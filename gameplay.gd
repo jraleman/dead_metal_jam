@@ -506,12 +506,12 @@ func _finish_round() -> void:
 		_director.halt()
 
 
-## Let the final hitscan tracer read before the results panel covers it.
+## Let the final tracer or destruction animation finish before results cover it.
 func _end_round() -> void:
 	if _ending_left >= 0.0:
 		return
 	if _round_active and _shot_fx != null and _shot_fx.active_count() > 0:
-		_ending_left = DmjShotFx.RESULT_SETTLE
+		_ending_left = _shot_fx.result_settle_seconds()
 		_round_timer.stop()
 		_router.set_accepting(false)
 		return
@@ -557,8 +557,10 @@ func _play_instruction() -> String:
 func _update_round(delta: float, _time_left: float) -> void:
 	if _router == null:
 		return
-	_shot_fx.set_field(_playfield_bounds())
+	var field := _playfield_bounds()
+	_shot_fx.set_field(field)
 	if _ending_left >= 0.0:
+		_director.refresh_layout(field)
 		_ending_left = maxf(_ending_left - delta, 0.0)
 		if is_zero_approx(_ending_left):
 			super._end_round()
@@ -637,6 +639,8 @@ func _playfield_bounds() -> Rect2:
 
 func _set_reduced_motion_enabled(value: bool) -> void:
 	super(value)
+	if value:
+		_reset_intense_effects()
 	if _life_rack != null:
 		_life_rack.set_presentation_options(value, _intense_effects_enabled)
 	if _shot_fx != null:
@@ -655,6 +659,11 @@ func _set_intense_effects_enabled(value: bool) -> void:
 		_director.set_effects_enabled(value)
 	if not value and _director != null:
 		_director.flash_rail(0.0)
+
+
+func _flash_screen(color: Color, alpha: float) -> void:
+	if not _reduced_motion_enabled:
+		super(color, alpha)
 
 
 ## The self-test tone is reachable during a round because a silent microphone
@@ -720,7 +729,7 @@ func _on_note_started(event: NoteEvent) -> void:
 	if int(judgement["kind"]) == EncounterDirector.Judgement.HIT:
 		_shot_fx.player_shot(
 			judgement["shot_position"], bool(judgement["killed"]),
-			event.midi_note, float(judgement["shot_scale"])
+			event.midi_note, float(judgement["shot_scale"]), judgement["shot_ground"]
 		)
 	else:
 		_shot_fx.miss()

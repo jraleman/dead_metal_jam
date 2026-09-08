@@ -16,6 +16,8 @@ const PAPER := Color("f4e6bf")
 const NOTE_INK := Color("20282a")
 const ACCENT := DmjPalette.AMBER
 const HOSTILE := DmjPalette.DANGER
+const DESTRUCTION_SECONDS := 0.9
+const DESTRUCTION_FADE_START := 0.5
 
 @export var notes: Array[int] = [47]:
 	set(value):
@@ -53,6 +55,8 @@ var combat_pose := false
 var beat_in := 0.0
 var hit_flash := 0.0
 var effects_enabled := true
+var destruction_age := 0.0
+var destruction_x_limits := Vector2(-INF, INF)
 
 
 func set_phrase(phrase: Array[int], cursor := 0) -> void:
@@ -116,15 +120,20 @@ static func foot_clearance(visual_scale: float) -> float:
 
 func _draw() -> void:
 	var bounds := visual_bounds()
+	var shadow := 1.0 - smoothstep(0.0, 0.45, destruction_age) if defeated and _effects_active() else 1.0
 	draw_set_transform(ground_offset(), 0.0, Vector2(1.0, 0.15))
-	draw_circle(Vector2.ZERO, bounds.size.x * 0.36, Color(0.0, 0.0, 0.0, 0.28))
+	for band in range(4):
+		draw_circle(
+			Vector2.ZERO, bounds.size.x * (0.36 - float(band) * 0.05),
+			Color(0.0, 0.0, 0.0, (0.08 + float(band) * 0.025) * shadow)
+		)
 	draw_set_transform(Vector2.ZERO)
 	_draw_character()
 	if charge >= 0.0 and not defeated:
 		_draw_charge(bounds)
 	if targeted and not defeated:
 		_draw_target(bounds)
-	if firing > 0.0:
+	if firing > 0.0 and _effects_active():
 		_draw_discharge()
 
 
@@ -133,11 +142,42 @@ func _draw_character() -> void:
 
 
 func _emitter(center: Vector2, radius := 9.0) -> void:
+	var energy := _charge_energy()
+	if energy > 0.0:
+		draw_circle(center, radius * 1.8, Color(HOSTILE, energy * 0.12))
+		for arc in range(3):
+			var angle := motion_time * 3.0 + float(arc) * TAU / 3.0
+			draw_arc(
+				center, radius * (1.25 + energy * 0.2), angle, angle + 0.9, 12,
+				Color(HOSTILE, energy * 0.85), 1.5, true
+			)
 	draw_circle(center, radius + 2.0, INK)
 	draw_circle(center, radius, METAL_DARK)
 	draw_arc(center, radius - 2.0, 0.0, TAU, 20, METAL_LIGHT, 2.0, true)
 	draw_circle(center, radius * 0.42, HOSTILE)
 	draw_circle(center - Vector2(1.0, 1.0), radius * 0.17, PAPER)
+
+
+func _charge_energy() -> float:
+	if not combat_pose or defeated or not _effects_active():
+		return 0.0
+	return clampf((charge - 0.55) / 0.45, 0.0, 1.0)
+
+
+func _effects_active() -> bool:
+	return effects_enabled and not reduced_motion
+
+
+func fragment_transform(pivot: Vector2, velocity: Vector2, spin: float, radius := 40.0) -> Transform2D:
+	if not defeated or not _effects_active() or destruction_age <= 0.04:
+		return Transform2D.IDENTITY
+	var age := clampf(destruction_age - 0.04, 0.0, DESTRUCTION_SECONDS)
+	var travel := velocity * age + Vector2(0.0, 180.0 * age * age)
+	travel.x = clampf(travel.x, destruction_x_limits.x, destruction_x_limits.y)
+	# Parts land on the deck instead of falling through the instrument console.
+	travel.y = minf(travel.y, ground_offset().y - pivot.y - radius + 6.0)
+	var angle := spin * age
+	return Transform2D(angle, pivot + travel - pivot.rotated(angle))
 
 
 func _wave(rate: float, phase := 0.0) -> float:
@@ -149,12 +189,31 @@ func _stride(amount: float, phase := 0.0) -> float:
 
 
 func _panel(points: PackedVector2Array, fill: Color, edge := INK, width := 2.2) -> void:
-	if effects_enabled and not reduced_motion:
+	if _effects_active():
 		fill = fill.lerp(Color.WHITE, hit_flash * 0.8)
 	draw_colored_polygon(points, fill)
+	_draw_bevel(points, fill)
 	var outline := points.duplicate()
 	outline.append(points[0])
 	draw_polyline(outline, edge, width, true)
+
+
+func _draw_bevel(points: PackedVector2Array, fill: Color) -> void:
+	var center := Vector2.ZERO
+	for point in points:
+		center += point
+	center /= float(points.size())
+	var inset := PackedVector2Array()
+	for point in points:
+		inset.append(point.move_toward(center, minf(4.0, point.distance_to(center) * 0.18)))
+	var light := Vector2(-0.55, -0.83).normalized()
+	for index in range(points.size()):
+		var next := (index + 1) % points.size()
+		var facing := (points[index].lerp(points[next], 0.5) - center).normalized().dot(light)
+		var shade := fill.lightened(facing * 0.3) if facing > 0.0 else fill.darkened(-facing * 0.38)
+		draw_colored_polygon(PackedVector2Array([
+			points[index], points[next], inset[next], inset[index],
+		]), shade)
 
 
 func _box_points(area: Rect2, cut := 3.0) -> PackedVector2Array:
@@ -181,12 +240,16 @@ func _box(area: Rect2, fill: Color, cut := 3.0, edge := INK) -> void:
 func _joint(center: Vector2, radius: float, fill := METAL) -> void:
 	draw_circle(center, radius + 2.0, INK)
 	draw_circle(center, radius, fill)
+	draw_arc(center, radius * 0.76, PI * 0.95, PI * 1.8, 16, fill.lightened(0.4), 1.5, true)
+	draw_arc(center, radius * 0.76, -PI * 0.05, PI * 0.8, 16, fill.darkened(0.4), 1.5, true)
 	draw_circle(center, maxf(radius * 0.28, 1.0), INK)
 
 
 func _limb(from: Vector2, to: Vector2, width: float, fill := METAL, ribs := 0) -> void:
 	draw_line(from, to, INK, width + 4.0, true)
 	draw_line(from, to, fill, width, true)
+	var highlight := Vector2(-0.14, -0.14) * width
+	draw_line(from + highlight, to + highlight, fill.lightened(0.28), maxf(width * 0.22, 1.0), true)
 	var side := (to - from).normalized().orthogonal() * width * 0.5
 	for index in range(1, ribs + 1):
 		var center := from.lerp(to, float(index) / float(ribs + 1))
@@ -243,7 +306,7 @@ func _plate_face(
 	var note_color := DmjPalette.note_color(note)
 	var fill := note_color if active else METAL_DARK.lerp(note_color, 0.28)
 	if broken:
-		fill = METAL_DARK
+		fill = METAL.lerp(note_color, 0.4) if defeated and _effects_active() else METAL_DARK
 	_panel(points, fill, note_color.lightened(0.3) if active and not broken else INK, 3.0 if active else 2.2)
 	if broken:
 		var c := glyph_area.get_center()
@@ -280,7 +343,7 @@ func _draw_charge(bounds: Rect2) -> void:
 	for division in range(1, 5):
 		var x := bar.position.x + bar.size.x * float(division) / 5.0
 		draw_line(Vector2(x, bar.position.y), Vector2(x, bar.end.y), INK, 1.0)
-	if effects_enabled and not reduced_motion and progress >= 0.78:
+	if _effects_active() and progress >= 0.78:
 		draw_rect(bar.grow(3.0), Color(HOSTILE, 0.15 + _wave(5.0) * 0.06), false, 2.0)
 
 
@@ -311,12 +374,12 @@ func _draw_target(bounds: Rect2) -> void:
 func _draw_discharge() -> void:
 	if combat_pose:
 		var center := muzzle_offset()
-		var muzzle_radius := 16.0 if reduced_motion else lerpf(20.0, 12.0, firing)
+		var muzzle_radius := lerpf(20.0, 12.0, firing)
 		draw_circle(center, muzzle_radius, Color(HOSTILE, firing * 0.3))
 		draw_circle(center, muzzle_radius * 0.35, Color(PAPER, firing))
 		draw_arc(center, muzzle_radius, 0.0, TAU, 24, Color(HOSTILE, firing), 2.0, true)
 		return
-	var radius := 62.0 if reduced_motion else lerpf(76.0, 54.0, firing)
+	var radius := lerpf(76.0, 54.0, firing)
 	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 36, Color(HOSTILE, firing), 3.0, true)
 	for index in range(6):
 		var direction := Vector2.from_angle(float(index) * TAU / 6.0)

@@ -20,22 +20,44 @@ func muzzle_offset() -> Vector2:
 
 
 func _draw_character() -> void:
-	_draw_leg(-1.0, 0.0)
-	_draw_leg(1.0, PI)
-	_draw_arm(-1.0, 0.0)
-	_draw_arm(1.0, PI)
+	for side in [-1.0, 1.0]:
+		draw_set_transform_matrix(fragment_transform(
+			Vector2(side * 29.0, 76.0), Vector2(side * 80.0, -80.0), -side * 2.8, 32.0
+		))
+		_draw_leg(side, 0.0 if side < 0.0 else PI)
+	for side in [-1.0, 1.0]:
+		draw_set_transform_matrix(fragment_transform(
+			Vector2(side * 77.0, 21.0), Vector2(side * 125.0, -85.0), side * 4.2, 44.0
+		))
+		_draw_arm(side, 0.0 if side < 0.0 else PI)
+	draw_set_transform_matrix(fragment_transform(
+		Vector2(0.0, 15.0), Vector2(-12.0, -25.0), -2.5, 68.0
+	))
 	_panel(PackedVector2Array([
 		Vector2(-47.0, -29.0), Vector2(46.0, -28.0),
 		Vector2(50.0, 60.0), Vector2(-49.0, 59.0),
 	]), METAL_DARK)
 	_box(Rect2(-30.0, -45.0, 60.0, 17.0), INK)
+	draw_set_transform_matrix(fragment_transform(
+		Vector2(0.0, -62.0), Vector2(25.0, -190.0), 3.5, 46.0
+	))
 	_draw_head()
 
 	var shoulders := notes.size() > 1
+	draw_set_transform_matrix(fragment_transform(
+		Vector2(-48.0, -30.0), Vector2(-135.0, -145.0), -4.5, 42.0
+	))
 	_draw_plate(Vector2(-48.0, -30.0), 40.0, 0 if shoulders else -1)
+	draw_set_transform_matrix(fragment_transform(
+		Vector2(48.0, -30.0), Vector2(135.0, -125.0), 5.2, 42.0
+	))
 	_draw_plate(Vector2(48.0, -30.0), 40.0, 1 if shoulders else -1)
 	var chest_index := 2 if notes.size() >= 3 else (0 if not shoulders else -1)
+	draw_set_transform_matrix(fragment_transform(
+		Vector2(0.0, 20.0), Vector2(30.0, -90.0), 3.0, 44.0
+	))
 	_draw_plate(Vector2(0.0, 20.0), 43.0, chest_index)
+	draw_set_transform(Vector2.ZERO)
 
 
 func _draw_head() -> void:

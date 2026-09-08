@@ -16,6 +16,8 @@ const LIGHT_REACH := 0.42
 const LIGHT_REST := 0.11
 const LIGHT_FLASH := 0.40
 const ROOM_COUNT := 3
+const STAGE_LAMPS: Array[float] = [0.18, 0.5, 0.82]
+const AMBIENT_MOTES := 24
 
 var _field := Rect2(Vector2.ZERO, Vector2(640.0, 360.0))
 var _corridor := Rect2(Vector2.ZERO, Vector2(640.0, 360.0))
@@ -110,15 +112,95 @@ func _draw_room(index: int, alpha: float) -> void:
 		return
 	var palette := _arena_palette(index)
 	_draw_shell(palette, alpha, index)
+	_draw_depth_frame(palette, alpha)
 	_draw_player_light(palette, alpha)
+	_draw_stage_lighting(palette, alpha)
 	_draw_room_set_pieces(index, palette, alpha)
 	if _effects_enabled and not _reduced_motion:
 		_draw_ambient(palette, alpha)
+	_draw_foreground_edges(palette, alpha)
 	_draw_room_label(index, palette, alpha)
+
+
+func _draw_depth_frame(palette: Dictionary, alpha: float) -> void:
+	for side in range(2):
+		var edge := float(side)
+		var inward := 1.0 if side == 0 else -1.0
+		var inner := edge + inward * 0.065
+		draw_polygon(PackedVector2Array([
+			_p(edge, 0.0), _p(inner, 0.12), _p(inner, 0.56), _p(edge, 0.82),
+		]), PackedColorArray([
+			_c(palette["shadow"], alpha), _c(palette["panel"], alpha),
+			_c(palette["wall"], alpha), _c(palette["shadow"], alpha),
+		]))
+		draw_line(_p(inner, 0.12), _p(inner, 0.56), _c(palette["detail"], alpha * 0.65), 2.0, true)
+		for brace in range(3):
+			var y := 0.22 + float(brace) * 0.15
+			draw_line(
+				_p(edge, y + 0.08), _p(inner, y),
+				_c(palette["detail"], alpha * 0.4), 2.0, true
+			)
+	var truss := PackedVector2Array([
+		_p(0.055, 0.085), _p(0.945, 0.085), _p(0.935, 0.125), _p(0.065, 0.125),
+	])
+	draw_colored_polygon(truss, _c(palette["shadow"], alpha * 0.9))
+	draw_line(truss[3], truss[2], _c(palette["detail"], alpha * 0.75), 2.0, true)
+	for brace in range(12):
+		var x := 0.065 + float(brace) * 0.0725
+		draw_line(_p(x, 0.12), _p(x + 0.036, 0.09), _c(palette["detail"], alpha * 0.45), 1.5, true)
+		draw_line(_p(x + 0.036, 0.09), _p(x + 0.072, 0.12), _c(palette["detail"], alpha * 0.3), 1.5, true)
+
+
+func _draw_stage_lighting(palette: Dictionary, alpha: float) -> void:
+	var time := _decorative_time()
+	var flare := _flash if _effects_enabled and not _reduced_motion else 0.0
+	for index in range(STAGE_LAMPS.size()):
+		var lamp := STAGE_LAMPS[index]
+		var sweep := sin(time * 0.32 + float(index) * 2.1) * 0.035
+		var foot := clampf(lamp + sweep, 0.15, 0.85)
+		var color: Color = palette["signal"] if index == 1 else palette["accent"]
+		# Vertex alpha feathers each cone down the room without post-processing.
+		for band in range(3):
+			var spread := 0.09 + float(band) * 0.026
+			var strength := alpha * (0.048 + flare * 0.018) / float(band + 1)
+			draw_polygon(PackedVector2Array([
+				_p(lamp - 0.016, 0.068), _p(lamp + 0.016, 0.068),
+				_p(foot + spread, 0.91), _p(foot - spread, 0.91),
+			]), PackedColorArray([
+				_c(color, strength), _c(color, strength),
+				_c(color, strength * 0.22), _c(color, strength * 0.22),
+			]))
+		var center := _p(foot, 0.88)
+		draw_set_transform(center, 0.0, Vector2(1.0, 0.14))
+		for band in range(4):
+			draw_circle(
+				Vector2.ZERO, _field.size.x * (0.12 - float(band) * 0.022),
+				_c(color, alpha * (0.013 + flare * 0.009))
+			)
+		draw_set_transform(Vector2.ZERO)
+
+
+func _draw_foreground_edges(palette: Dictionary, alpha: float) -> void:
+	for side in range(2):
+		var edge := float(side)
+		var inward := 1.0 if side == 0 else -1.0
+		var points := PackedVector2Array([
+			_p(edge, 0.47, 1.5), _p(edge + inward * 0.014, 0.50, 1.5),
+			_p(edge + inward * 0.024, 1.0, 1.5), _p(edge, 1.0, 1.5),
+		])
+		draw_colored_polygon(points, _c(palette["shadow"], alpha * 0.9))
+		draw_line(points[1], points[2], _c(palette["detail"], alpha * 0.5), 2.0, true)
+	draw_line(_p(0.0, 0.998, 1.5), _p(1.0, 0.998, 1.5), _c(palette["shadow"], alpha * 0.8), 3.0, true)
 
 
 func _draw_ambient(palette: Dictionary, alpha: float) -> void:
 	var zoom := minf(1.0, _field.size.y / 360.0)
+	for mote in range(AMBIENT_MOTES):
+		var point := _mote_position(mote)
+		var depth := float(mote % 3) / 2.0
+		var radius := lerpf(0.8, 1.8, depth) * zoom
+		draw_circle(point, radius * 3.0, _c(palette["accent"], alpha * 0.035))
+		draw_circle(point, radius, _c(palette["signal"], alpha * lerpf(0.12, 0.3, depth)))
 	for vent in range(2):
 		var origin := _p(0.085 if vent == 0 else 0.91, 0.76 if vent == 0 else 0.63)
 		for puff in range(5):
@@ -135,6 +217,19 @@ func _draw_ambient(palette: Dictionary, alpha: float) -> void:
 			var point := origin + velocity * age + Vector2(0.0, age * age * 80.0 * zoom)
 			draw_line(point, point - velocity.normalized() * 7.0 * zoom,
 				_c(DmjPalette.AMBER, alpha * (1.0 - phase * 2.0)), 1.5, true)
+
+
+func _mote_position(index: int) -> Vector2:
+	var depth := float(index % 3) / 2.0
+	var time := _decorative_time()
+	var age := fposmod(time * lerpf(0.018, 0.055, depth) + float(index) * 0.618034, 1.0)
+	var drift := sin(time * 0.22 + float(index)) * 0.017
+	var x := 0.05 + fposmod(float(index) * 0.381966 + drift, 1.0) * 0.9
+	return _p(x, lerpf(0.91, 0.15, age))
+
+
+func _decorative_time() -> float:
+	return _motion_time if _effects_enabled and not _reduced_motion else 0.0
 
 
 func _draw_shell(palette: Dictionary, alpha: float, arena_index: int) -> void:
@@ -157,7 +252,7 @@ func _draw_shell(palette: Dictionary, alpha: float, arena_index: int) -> void:
 	var ceiling := PackedVector2Array([_p(0.0, 0.0), _p(1.0, 0.0), _p(0.94, 0.12), _p(0.06, 0.12)])
 	draw_colored_polygon(ceiling, shadow)
 	draw_line(_p(0.06, 0.12), _p(0.94, 0.12), detail, 4.0, true)
-	for lamp in [0.18, 0.5, 0.82]:
+	for lamp in STAGE_LAMPS:
 		draw_line(_p(lamp - 0.06, 0.065), _p(lamp + 0.06, 0.065), shadow, 12.0, true)
 		draw_line(_p(lamp - 0.055, 0.065), _p(lamp + 0.055, 0.065), _c(palette["signal"], alpha * 0.6), 3.0, true)
 	for side in [0.015, 0.955]:
@@ -425,19 +520,28 @@ func _draw_hook(anchor: Vector2, accent: Color, light: Color) -> void:
 
 func _draw_turbine(center: Vector2, radius: float, body: Color, accent: Color, glow: Color) -> void:
 	draw_circle(center, radius + 6.0, body)
-	draw_circle(center, radius * 0.66, _c(DmjPalette.INK, body.a))
-	draw_circle(center, radius * 0.3, glow)
+	draw_circle(center, radius, _c(DmjPalette.INK, body.a))
+	draw_arc(center, radius + 3.0, 0.0, TAU, 48, accent, 2.5, true)
 	for blade in range(6):
-		var angle := float(blade) * TAU / 6.0 + PI * 0.08 + (0.0 if _reduced_motion else _motion_time * 0.9)
+		var angle := float(blade) * TAU / 6.0 + PI * 0.08 + _decorative_time() * 0.9
 		var direction := Vector2.from_angle(angle)
-		draw_line(center, center + direction * radius, accent, 5.0, true)
+		var tangent := direction.orthogonal()
+		var points := PackedVector2Array([
+			center + (direction * 0.2 - tangent * 0.08) * radius,
+			center + (direction * 0.9 - tangent * 0.21) * radius,
+			center + (direction * 0.78 + tangent * 0.15) * radius,
+			center + (direction * 0.28 + tangent * 0.12) * radius,
+		])
+		draw_colored_polygon(points, body.lerp(accent, 0.65))
 		draw_line(
-			center + direction * (radius * 0.28),
-			center + direction * (radius * 0.86),
-			_c(DmjPalette.TEXT, accent.a * 0.22),
-			1.0,
-			true
+			points[0], points[1], _c(DmjPalette.TEXT, accent.a * 0.4), 1.4, true
 		)
+	draw_circle(center, radius * 0.23, body)
+	draw_arc(center, radius * 0.23, 0.0, TAU, 24, accent, 2.0, true)
+	draw_circle(center - Vector2(radius * 0.03, radius * 0.03), radius * 0.1, glow)
+	for bolt in range(8):
+		var point := center + Vector2.from_angle(float(bolt) * TAU / 8.0) * (radius + 3.0)
+		draw_circle(point, 1.6, _c(DmjPalette.TEXT, accent.a * 0.65))
 
 
 func _draw_catwalk(from: Vector2, to: Vector2, body: Color, accent: Color) -> void:
@@ -449,10 +553,22 @@ func _draw_catwalk(from: Vector2, to: Vector2, body: Color, accent: Color) -> vo
 
 
 func _draw_reactor_core(center: Vector2, radius: float, body: Color, accent: Color, glow: Color) -> void:
+	var time := _decorative_time()
+	var pulse := 0.85 + sin(time * 1.8) * 0.15
+	for band in range(4):
+		draw_circle(center, radius * (1.5 - float(band) * 0.18), _c(glow, 0.035 * pulse))
 	draw_circle(center, radius + 10.0, body)
-	draw_circle(center, radius + 4.0, accent)
-	draw_circle(center, radius * 0.56, body.lightened(0.18))
-	draw_circle(center, radius * 0.28, glow)
+	draw_arc(center, radius + 4.0, 0.0, TAU, 48, accent, 3.0, true)
+	draw_circle(center, radius * 0.72, body.lightened(0.18))
+	draw_circle(center - Vector2(radius * 0.08, radius * 0.1), radius * 0.53, _c(glow, pulse * 0.55))
+	draw_circle(center - Vector2(radius * 0.15, radius * 0.18), radius * 0.3, _c(DmjPalette.TEXT, glow.a * pulse * 0.75))
+	for ring in range(2):
+		var angle := (0.55 + time * 0.28) * (-1.0 if ring == 0 else 1.0)
+		draw_set_transform(center, angle, Vector2(1.0, 0.4))
+		draw_arc(Vector2.ZERO, radius * 1.1, 0.0, TAU, 48, _c(glow, 0.8), 2.5, true)
+		var orbit := Vector2.from_angle(time * 0.8 + float(ring) * PI) * radius * 1.1
+		draw_circle(orbit, 3.0, _c(DmjPalette.TEXT, glow.a * 0.8))
+	draw_set_transform(Vector2.ZERO)
 	draw_line(center - Vector2(0.0, radius * 1.8), center + Vector2(0.0, radius * 1.8), accent, 6.0, true)
 	draw_line(center - Vector2(radius * 1.1, 0.0), center + Vector2(radius * 1.1, 0.0), accent, 6.0, true)
 
@@ -509,9 +625,9 @@ func _draw_text(text: String, baseline: Vector2, size: int, color: Color) -> voi
 	draw_string(font, baseline, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, color)
 
 
-func _p(x: float, y: float) -> Vector2:
+func _p(x: float, y: float, parallax := 1.0) -> Vector2:
 	var bob := _corridor.position - JamBot.corridor_rect(_field).position
-	return _field.position + bob + _field.size * Vector2(x, y)
+	return _field.position + bob * parallax + _field.size * Vector2(x, y)
 
 
 func _light_at(progress: float) -> float:

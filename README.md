@@ -50,11 +50,32 @@ camera. Filling **attack bars** show when they will shoot, without numeric
 countdowns. The closing target ring and the HUD's **ON BEAT** cue show the bonus window.
 Loading Bay, Turbine Hall, and Reactor Deck give each encounter a distinct
 industrial setting, with room transitions instead of a scrolling treadmill.
-Hits rock the armor and throw sparks; kills collapse the chassis into a burst
-of debris, smoke and energy. The amplifier recoils and ejects casings, while
-turbines, vent steam and electrical sparks animate the rooms. Effects are
-bounded even during rapid MIDI input. Reduced motion or disabled effects keeps
-static shot paths, colors and outcome markers without recoil, flashes or particles.
+Hits rock the armor and throw sparks. Kills erupt into large amber-white
+fireballs with additive glow, note-colored shock rims, and longer-lived sparks,
+smoke and tumbling metal. The blast grows quickly and holds its bright core
+instead of fading before it becomes visible; floor shockwaves light the deck
+beneath it. The amplifier recoils and ejects casings, and clear **DOWN** labels
+stay above the blast.
+
+Both playable drones have a **0.9-second destruction animation**: an impact
+kick, followed by separately spinning heads, arms, legs and armor plates that
+settle and fade. Wreckage cannot be targeted or hold the next wave's firing bay,
+and the animation keeps playing during Demo's held beat. Results allow the
+final breakup to finish instead of covering it early. Misses and nonlethal
+plate hits retain their shorter feedback.
+
+Beveled armor, shaded joints and soft contact shadows give the drones more
+depth. Feathered stage-light shafts sweep through drifting dust, foreground
+steelwork adds subtle parallax, and bladed turbines and orbiting reactor rings
+bring the rooms to life. The opening and share artwork reuse the same improved
+scenery and drone surfaces. Everything remains procedural **2.5D** in the
+existing compatibility renderer, without 3D scenes or new asset dependencies.
+
+Effects are bounded even during rapid MIDI input. Reduced motion or disabled
+effects keeps static shot paths, colors and outcome markers without recoil,
+flashes or particles; stage lights and machinery hold still. Switching effects
+back on animates new shots rather than replaying earlier explosions or deaths.
+With motion suppressed, destroyed drones keep their short, simple fade.
 
 ### Notes and armor
 

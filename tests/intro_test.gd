@@ -284,6 +284,12 @@ func _test_reduced_motion_reaches_the_actors() -> void:
 			is_zero_approx(float(intro.get("_shake"))),
 			"Reduced motion must leave the stage still."
 		)
+		intro.call("_flash_screen", 0.3)
+		var flash: ColorRect = intro.get("_flash")
+		_expect(
+			is_zero_approx(flash.color.a),
+			"Reduced motion also suppresses the opening's full-screen flashes."
+		)
 		intro.queue_free()
 		await process_frame
 
