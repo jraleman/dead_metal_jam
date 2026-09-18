@@ -12,6 +12,7 @@ const ARENA_NAMES := [
 	"TURBINE HALL",
 	"REACTOR DECK",
 ]
+const ROOM_STRIDE := 34.0
 
 const ARENA_DEPTHS := [
 	[0.78, 0.62, 0.86],
@@ -22,6 +23,21 @@ const ARENA_DEPTHS := [
 
 static func arena_name(arena_index: int) -> String:
 	return ARENA_NAMES[posmod(arena_index, ARENA_NAMES.size())]
+
+
+static func world_origin(arena_index: int) -> Vector3:
+	return Vector3(0, 0, -float(arena_index) * ROOM_STRIDE)
+
+
+static func world_position(lane: int, arena_index: int, slot := 0) -> Vector3:
+	var x := float(lane - 1) * 6.2
+	if slot > 0:
+		var side := (1.0 if lane == 0 else -1.0) if lane != 1 else (
+			1.0 if slot % 2 == 1 else -1.0
+		)
+		x += side * (3.2 + float(slot - 1) * 0.35)
+	var z := -2.0 - (1.0 - depth(lane, arena_index, slot)) * 12.0
+	return world_origin(arena_index) + Vector3(x, 0, z)
 
 
 static func depth(lane: int, arena_index: int, slot: int = 0) -> float:

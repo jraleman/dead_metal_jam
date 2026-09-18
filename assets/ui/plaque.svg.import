@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://ch3y5fw1a488t"
 path.s3tc="res://.godot/imported/plaque.svg-f6f518cc87d7eb64b2c62578ad400031.s3tc.ctex"
+path.etc2="res://.godot/imported/plaque.svg-f6f518cc87d7eb64b2c62578ad400031.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://games/dead_metal_jam/assets/ui/plaque.svg"
-dest_files=["res://.godot/imported/plaque.svg-f6f518cc87d7eb64b2c62578ad400031.s3tc.ctex"]
+dest_files=["res://.godot/imported/plaque.svg-f6f518cc87d7eb64b2c62578ad400031.s3tc.ctex", "res://.godot/imported/plaque.svg-f6f518cc87d7eb64b2c62578ad400031.etc2.ctex"]
 
 [params]
 

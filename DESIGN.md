@@ -1,8 +1,8 @@
 # Dead Metal Jam — Game Design Document
 
-> **Status:** design draft, pre-implementation. The first build is a **proof of
-> concept for a game jam**, so "MVP" throughout this document means *the jam
-> build*: the smallest thing that proves the concept against a deadline.
+> **Status:** playable **3D on-rails build**, with four enemy types and no
+> background music. Historical MVP decisions and the revision log are retained
+> below; the presentation, roster and audio contracts describe the current build.
 > **Target engine:** Godot 4.7, `gl_compatibility` renderer, built as a game
 > folder inside the existing `dcs_games` base project.
 > **Platforms:** **desktop first, web and mobile in scope** (§4.7). The jam
@@ -45,7 +45,7 @@ There is no trigger button. The instrument *is* the gun.
 | Genre | On-rails shooter. Movement is automatic; the player only aims-by-pitch and times. |
 | Reference points | *Time Crisis* / *House of the Dead* for pacing and staging; *SUPERHOT* for the look. |
 | Weapon | A real instrument. Note identity matters — a C must be told apart from an E. |
-| Presentation | **2.5D fake depth inside the existing 2D playfield.** Fixed firing bays supply scale and depth; no `Node3D`. Keeps `gl_compatibility` and the `%Playfield` contract intact. |
+| Presentation | **Real 3D mesh rooms, enemies and effects**, viewed through a perspective camera in an isolated `SubViewport`. The HUD stays 2D; `gl_compatibility` and the shared `%Playfield` contract remain intact. |
 | Instrument target | **Any monophonic instrument, one note at a time** — guitar, bass, voice, wind, or one key at a time. Chords are stretch. |
 | Platform | **Desktop first; web and mobile in scope.** The jam build ships Linux / Windows / macOS. Web and mobile follow, and the input layer is designed so reaching them is a source swap, not a rewrite (§4.7). The base's `gl_compatibility` renderer already exports to all three unchanged. |
 | Modes | **All three from `README.md` ship in MVP:** Demo, Rhythm, Jam. |
@@ -78,19 +78,20 @@ The concept-based drone artwork is described in section 8.4; encounter rules
 remain unchanged by those earlier presentation passes. The subsequent arcade
 revision below intentionally changes Jam's timing gate and enemy movement.
 
-The dimensional effects pass adds beveled surfaces, feathered stage lighting,
-bounded drifting dust, foreground parallax and animated turbine/reactor detail.
-Kills combine a fast-growing, sustained bright fireball and additive glow with
-a 0.9-second articulated breakup: heads, limbs and armor plates travel and spin
-independently before fading. Perspective-scaled debris and smoke linger behind
-them; floor shockwaves use a captured foot position and render underneath the
-actors. Wreckage does not delay waves or reserve firing bays beyond the original
-short exit interval. Results leave time for the final breakup, while reduced
-motion keeps a short static fade. Impact labels stay above the debris. This is
-still procedural 2D
-drawing, not a `Node3D` scene or a renderer-dependent post-process. Decorative
-motion follows the encounter clock and accessibility switches; shot feedback
-retains its separate presentation clock without changing judgement or damage.
+The 3D pass replaces the fake-depth playfield with lit mesh chassis, articulated
+limbs, physical firing bays, perspective-projected notes, shadows and animated
+machinery. The rail camera moves through open gates between physical rooms.
+Kills combine an energy burst with a 0.9-second articulated breakup; world-space
+tracers and ground rings are captured from the actual core, gun and foot positions.
+At most two rooms, 32 shot records and 128 debris particles are retained.
+Results leave time for the final breakup, while reduced motion keeps a short
+static fade. Decorative motion follows the encounter clock; confirmed-shot
+feedback has its own presentation clock and never judges notes or deals damage.
+
+There is no background music in the opening or any round. Authored charts still
+provide note grids and visual beat timing, but never start an audio stream.
+The game stops inherited music before microphone calibration, without changing
+the player's music/SFX settings or silencing short hit and menu feedback.
 
 ---
 
@@ -171,7 +172,7 @@ wind-up fuses and the chart cursor therefore stop and start together and cannot
 drift apart — which a per-system freeze flag would not have guaranteed.
 
 Confirmed-shot feedback has its own short presentation clock so a hit remains
-visible even if Demo immediately holds the next beat. `DmjShotFx` inherits
+visible even if Demo immediately holds the next beat. `DmjShotFx3D` inherits
 normal scene pause, retains no enemy references, and never changes scoring
 or damage.
 
@@ -825,10 +826,9 @@ as the game being broken. Permanently visible, bottom-centre, game-owned:
   honouring the intense-visual-effects and reduced-motion settings. The game
   adds the arm-cannon muzzle flash, a red shot to the player's emitter, and a
   ~120 ms hit-stop.
-- Every played note flares the light pool at the camera's feet (§8.1) — hard on
-  a hit, faint on a miss, scaled by how hard the note was struck. It is the
-  game's muzzle flash, and it is drawn *behind* the bots on purpose so that
-  lighting up never costs the player the thing they are aiming at.
+- Every played note briefly lights the 3D foreground (§8.1), stronger on a hit
+  than a miss and scaled by how hard the note was struck. Unshaded note plates
+  and glyphs stay readable. Reduced motion and disabled effects suppress it.
 
 Shots use **hitscan resolution**: the note judgement or enemy fire event is
 authoritative immediately. The full tracer and impact marker appear at once;
@@ -839,11 +839,11 @@ disabled effects. A round with a final tracer settles for 0.32 seconds before
 results cover the field; input is disabled during this interval, replay clears
 all effects, and a lethal shot cannot become a track-clear victory.
 
-Hit reactions pivot around planted feet, and auto-aim uses the resulting art
+Hit reactions pivot around planted feet, and auto-aim uses the actual 3D core
 transform. Confirmed reactions finish on a presentation clock even when Demo
-holds the next beat. Kills collapse the chassis with an energy burst, metal
-debris and smoke; plate hits shed sparks and fragments. The weapon recoils and
-ejects casings. `DmjShotFx` caps both shot records and particles (48 and 256);
+holds the next beat. Kills break up the chassis with an energy burst and metal
+debris; plate hits shed sparks and fragments. The amplifier recoils and flashes
+a note-colored light. `DmjShotFx3D` caps shot records and debris at 32 and 128;
 neither can change scoring or damage. Disabling effects or enabling reduced
 motion clears particles and suppresses recoil/flash while retaining outcomes.
 
@@ -1113,11 +1113,13 @@ phase boundary consumes frame overshoot, so the attack bar and the
 fire event agree even at a low frame rate. Breaking a plate moves its bonus
 beat, not the firing deadline.
 
-`DmjRail` retains its integration API but now renders industrial combat rooms:
-Loading Bay, Turbine Hall, and Reactor Deck. Machinery, fixed floor geometry,
-doors, cables and cargo replace scrolling rails, repeating cross-ties and the
-yellow strike line. Inter-wave transitions change the room; nothing scrolls
-under a stationary firefight.
+`DmjArena3D` displays Loading Bay, Turbine Hall and Reactor Deck, built by
+`DmjRoom3D` from real meshes. Their origins are 34 world units apart, and the
+camera travels through a central gate between them. Only the current room and
+the one being left are retained. `DmjArenaLayout.world_position()` is shared by
+the physical firing pads and the robot models. Corpses in another room cannot
+reserve the new room's bays. `DmjRail` remains only for the original 2D
+concepts and legacy geometry tests; it is hidden in gameplay.
 
 The shared floor inset still leaves architectural headroom. Camera breathing
 is small and uses the encounter clock, so Demo freezes it; reduced motion
@@ -1131,27 +1133,20 @@ player shots a visible origin without covering the enemies' note plates.
 | --- | --- | --- | --- |
 | **Rusty Clanky** | One note, one hit. | The core verb. | ✅ Built |
 | **Plated Knuckle** | Exactly three notes in order, one plate per hit. Wrong notes reset the armor. | Phrasing; reading ahead. | ✅ Built |
-| **Silencer Sentry** | Fires if *any* note is played while it crosses. Killed by waiting it out. | Restraint; makes the noise penalty legible as a rule. | Stretch |
-| **The Conductor** (boss) | Phases, each demanding a riff drawn from the chart. | Payoff. | Stretch — MVP ends on a heavy wave, not a boss. |
+| **Silencer Sentry** | Repeat the same note: first the shield, then the core. Shield damage persists through wrong notes. | Re-articulation and listening. | Built |
+| **The Conductor** (miniboss) | Four notes in order, with a checkpoint after each pair. A wrong note restarts only the unfinished pair. | Longer phrases and recovery. | Built |
 
-Four enemies, and each one asks for something the others do not: one note,
-several notes in order, *no* notes, and a whole riff. That is the whole span of
-what an instrument can be asked for, which is why the list is this short — an
-enemy that does not add a new demand only adds art.
+The original silence-only Sentry concept is superseded by an echo shield:
+every playable enemy is defeated by playing notes, never by withholding input.
+All authored tracks include Sentries and a final Conductor. The default practice
+ramp introduces single notes, echoes, three-note armor and the four-note boss
+over four waves.
 
-**As built:** the two shipped enemies share a base, `JamBot`, which owns
-everything that is true of *any* bot — lane, approach, wind-up, firing, death,
-the note glyph, the depth fake. A subclass supplies only three things: what it
-demands (`demand_size`), what a correct note does to it (`strike`), and how it
-is drawn. Character drawings now live separately under `enemies/art/`, so the
-same art can be shown without constructing a combat actor.
-
-That split is what let the roster grow without the matching rule learning a
-second shape. `EncounterDirector.resolve_note()` calls `strike()` and asks
-afterwards whether the bot is still targetable; it never checks what kind of
-bot it hit. A Silencer Sentry — whose correct answer is *no note* — is a third
-subclass and no change at all to the rules, which is the test this refactor
-was actually for.
+All four share `JamBot`'s timing, targeting, firing and death state.
+`DmjPhraseBot` owns reusable sequence progression, future-beat rebasing and
+reset checkpoints. `EncounterDirector.resolve_note()` still calls `strike()`
+without special-casing damage by enemy type. `DmjDrone3D` reads that state to
+pose meshes and show the same current note used for judgement.
 
 ### 8.3 Note-to-shooting mapping
 
@@ -1161,16 +1156,17 @@ was actually for.
   notes kill them in firing order. This is a feature, and charts
   should use it for tremolo-picked runs.
 - In **Rhythm mode** every bot accepts any note; the front-most valid target is
-  simply the front-most bot.
-- Multi-note enemies (Plated Knuckle) hold an internal cursor and reset it on a
-  wrong note in the sequence.
+  the one with the next unanswered beat. The 3D cores say **ANY**, not a pitch.
+- Multi-note enemies share a cursor but have distinct reset rules: all three
+  plates, a permanently broken echo shield, or a two-note boss checkpoint.
 
 **As built:** `arcade_shots` is enabled for Jam only. A matching live target is
 selected by firing urgency and always takes a hit; timing determines its
-score. Rhythm and Demo retain the existing ordered, in-window selection so
-their practice behavior and held-beat targeting remain intact. The hit's
-position is captured before `strike()` changes a plate cursor, so the tracer
-lands on the plate that actually took the note.
+score. Rhythm and Demo retain in-window selection and prioritize the earliest
+unanswered beat. Between steps of a phrase, an earlier beat on another robot
+takes focus in both the HUD and reticle; Demo holds that beat rather than
+letting it become impossible to answer. A confirmed shot uses the current
+3D core position and cannot retroactively damage an actor after a tracer flies.
 
 **As built, phrases:** a Plated Knuckle's plates are each their own beat.
 Breaking one pushes the next bonus beat out by one plate interval. Jam permits
@@ -1189,47 +1185,24 @@ player has not engaged yet.
 
 ### 8.4 Art
 
-All four sketches in `assets/drones/` have procedural 2D character drawings
-under `enemies/art/`. They keep the concepts' distinctive silhouettes: Rusty
-Clanky's antennae, crooked grin and rattling limbs; Plated Knuckle's crest,
-heavy shoulders and diamond plates; Silencer Sentry's rotor and stitched
-grille; and The Conductor's top hat, amplifier body, wheels and baton.
+`DmjDrone3D` builds four distinct mesh silhouettes: a rusty walker, a heavy
+three-plate chassis, a hovering shielded Sentry and the Conductor's top hat
+and batons. Lit armor and limbs, unshaded note plates, `Label3D` glyphs,
+health-step previews, target rings and attack bars all occupy the same world.
+`DmjMeshKit` shares primitive construction and materials across enemies, rooms
+and effects. There are no billboard robot sprites or renderer-specific
+post-processing requirements.
 
-`DmjDroneArt` owns the shared drawing helpers, readable note plates, targeting
-brackets and charge bar. `JamBot` supplies the current notes, phrase cursor,
-charge and pose time; no drawing owns a gameplay clock. Gaits, rotor motion
-and conducting gestures therefore freeze under reduced motion, and live
-actors also hold their poses during Demo's stop-time. Feet and ground shadows
-are anchored to their firing bays. The larger
-silhouettes scale down in short playfields, with shadow/bracket clearance
-reserved above the HUD. Live Rusty/Plated poses raise an arm-mounted emitter;
-their attack bars and bonus rings reuse the same art layer.
+The models read the encounter clock for idle motion and the actor's separate
+feedback clock for impact and breakup. Demo therefore freezes machinery and
+aiming poses, not the effect of a note the player just played. Reduced motion
+and disabled effects park decorative motion immediately, including the camera,
+and do not replay old deaths when re-enabled.
 
-Plated Knuckle lights only its current note plate. Future plates are muted
-and numbered, while completed plates are visibly cracked. All three plates
-are used: shorter authored phrases cycle, and longer phrases use their first
-three notes. The displayed notes come
-from the same sequence cursor that scoring uses, not letters baked into art.
-
-**This is an art-only roster expansion.** Rusty Clanky and Plated Knuckle
-use their new drawings in encounters and the opening/share artwork.
-Silencer Sentry and The Conductor remain visual previews: no new roster keys,
-chart changes, silence rules or boss phases are enabled. Run
-`ui/drone_gallery.tscn` to inspect all four, cycle notes/plates, toggle charge
-poses and pause motion. The gallery contains drawing nodes, not enemies.
-
-**Distance also costs contrast.** `_place()` tints a bot toward the corridor's
-dust colour by how far away it is, which is what makes the walls and the floor
-look like they contain air. The tint is deliberately partial: a bot's glyph is
-the note the player is being asked for, so fogging it all the way into the dust
-would be asking the question in a colour nobody can read. It stays subtle at
-the fixed firing depths and never touches alpha — transparency is reserved
-for the death and muzzle fades, which mean
-something else.
-
-Enemy apparent size now comes from the firing position rather than elapsed
-lead-in time. Notes are timed against the target ring and HUD, not a body
-walking toward a line.
+The opening and share card use the same 3D room and chassis classes.
+Share models have no advancing encounter clock. The original drawings under
+`enemies/art/` and `ui/drone_gallery.tscn` remain an archival concept workshop,
+clearly distinguished from the playable 3D enemies.
 
 ### 8.5 Wave authoring
 
@@ -1292,12 +1265,19 @@ godot-base/games/dead_metal_jam/
   encounter/
     encounter_director.gd      # ✅ class_name EncounterDirector — lanes, waves, matching, tiers
     track_builder.gd           # ✅ class_name DmjTrackBuilder — practice waves; the chart's seam
-    rail.gd                    # ✅ class_name DmjRail — the visible lanes and the advance
-    track_bed.gd               # ✅ class_name DmjTrackBed — the round's song, owned by the round
+    arena_3d.gd                # 3D viewport, perspective rail camera and presentation adapter
+    room_3d.gd                 # lit industrial mesh rooms and animated machinery
+    mesh_kit.gd                # shared primitive meshes and materials
+    shot_fx_3d.gd              # bounded world-space tracers, outcomes and debris
+    rail.gd                    # archival 2D scenery, not the gameplay renderer
   enemies/
     jam_bot.gd                 # ✅ class_name JamBot — everything true of any bot
     rusty_clanky.gd            # ✅ class_name RustyClanky — one note, one hit
     plated_knuckle.gd          # ✅ class_name PlatedKnuckle — a phrase, one plate per note
+    phrase_bot.gd              # shared sequence timing and checkpoint resets
+    silencer_sentry.gd         # repeat one note: shield, then core
+    conductor.gd               # four-note miniboss with two-note checkpoints
+    drone_3d.gd                # shared mesh models and visual state
   ui/
     tuner.tscn + .gd           # ✅ standalone soundcheck / tuner, runnable on its own
     calibration.tscn + .gd     # ✅ standalone latency calibration, runnable on its own
@@ -1306,13 +1286,13 @@ godot-base/games/dead_metal_jam/
     soundcheck.tscn + .gd
     share_art.tscn + .gd       # ✅ game-owned share card art
   assets/
-    demo.ogg                   # ✅ the round's music — the author's own song, trimmed to 3:05
-    track_02.ogg               # ✅ "Scrapyard Stomp" — generated, see §10
-    track_03.ogg               # ✅ "Overdrive" — generated, see §10
-    intro-bg.ogg               # ✅ the intro slideshow's bed, trimmed to 0:20
+    demo.ogg                   # archival audio; not loaded or played by the game
+    track_02.ogg               # archival generated audio
+    track_03.ogg               # archival generated audio
+    intro-bg.ogg               # archival opening audio
     images/
   tools/
-    make_tracks.py             # ✅ writes track_02/03: both the .ogg and the .tres
+    make_tracks.py             # writes note charts; --audio opts into archival audio
   tests/
     pitch_detector_test.gd     # ✅ DSP: which note is this window?
     playing_techniques_test.gd # ✅ the onset rule against real playing, in a real room
@@ -1393,8 +1373,10 @@ game.supports_multiplayer = false          # one instrument, one player
 game.supports_cpu_opponent = false
 game.control_style = GameManifest.CONTROL_STYLE_TARGETS
 game.share_art_scene_path = "res://games/dead_metal_jam/ui/share_art.tscn"
-game.tutorial_video_path = "res://assets/video/tutorial_dead_metal_jam.ogv"
-game.tutorial_poster_path = "res://assets/video/tutorial_dead_metal_jam_poster.webp"
+game.tutorial_video_path = "res://games/dead_metal_jam/assets/video/tutorial.ogv"
+game.tutorial_poster_path = (
+	"res://games/dead_metal_jam/assets/video/tutorial_poster.webp"
+)
 game.tunables = DeadMetalJamOptions.TUNABLES
 game.copy = { ... }                        # mode-select and instructions wording
 game.achievements = { ... }                # see 9.6
@@ -1430,12 +1412,11 @@ mode screen to return to.
 | `_begin_first_round()` | Start the round — and hold it. This hook **must** call `_start_round()` (revision 6), so the Soundcheck overlay this table originally described is an *in-round* hold rather than a screen in front of one. Mode selection and the input source therefore ship as Settings rows instead (§3, §9.4), and neither needs a framework screen either way. |
 | `_load_round_settings()` | `super()` — which reads the round mode, the lives pool and the handicaps — then the mode, chart, hit-window and latency tunables. `_director.apply_mode()` is called here, so a mode change takes effect on the next round and never mid-round. |
 | `_reset_round_state()` | Reset combo, chart cursor and room position; clear drones, tracers and pending round endings. **Not lives** — the shell rearms the pool itself. |
-| `_activate_round()` | Start the chart clock, the rail and the round's song — the song on the game's own [`DmjTrackBed`], not through `AudioManager` (§9.5 row 9). |
+| `_activate_round()` | Stop inherited music immediately and start the encounter clock. Charts never start an audio stream. |
 | `_update_round(delta, time_left)` | Advance the chart cursor, tick the rail, update bots, drain the mic buffer, poll the detector thread's result. |
 | `_handle_gameplay_input(event)` | MIDI and keyboard events. `pause` is already consumed by the shell; skip routing when `_player_is_out(0)`. |
 | `_end_round()` | Let a confirmed final impact remain visible for 0.32 s before the normal results path; stop the timer and further input during that interval. |
-| `_finish_round()` | Stop the chart, stop the rail, close MIDI ports, and fade the song out over 0.6 s — long enough that the results panel does not read as a crash. Stopping the song on a *pause* or an *exit* is not a hook at all: [`DmjTrackBed`] answers the engine's own `NOTIFICATION_PAUSED` / `NOTIFICATION_EXIT_TREE` itself, because the overlay's own *Exit to main menu* hands the scene to `Router` without the round ever being told it is over (§9.5 row 9). |
-| `_on_pause_closed()` | `super()`, then resume the song from the position the pause held it at, while a round is still running. The one part of the song's life the bed cannot handle for itself, and the reason it is safe: the overlay emits `closed` from `resume()` and from nowhere else, so exiting cannot reach it. |
+| `_finish_round()` | Stop the encounter and accepting notes, clear 3D effects, and leave no music playing. Scene pause is inherited by the 3D presentation; resuming does not start audio. |
 | `_round_totals()` / `_player_stats(0)` | Score, hits, misses, accuracy, best combo. |
 | `_describe_round_outcome()` | `TRACK CLEARED` / `WIPED OUT` / `SET FINISHED`. |
 | `_round_highlight_summary()` | "Best combo ×8 · 94% pitch accuracy". |
@@ -1532,7 +1513,7 @@ the third settings row that came with it.
 | 6 | `game_shell.gd` — public `finish_round_early()` | **Recommended** (§7.4). One-line wrapper over the existing `_end_round()`; names no game. |
 | 7 | `game_shell.gd` — lives, round mode, damage feedback | **Already done.** Shipped in the base; consumed through `_lose_life()` / `_player_is_out()` / `_lives_rule_note()`. |
 | 8 | `share_card.gd` — honour `share_art_scene_path` | **Done.** The manifest field existed and *nothing read it*, so "use a game-owned art scene instead of adding a third hardcoded style" was not actually a way out — it was a field that did nothing. `_install_game_art()` now swaps `%ActionArt` for the manifest's scene, and swaps it back when the card is reconfigured for a game that has none. ~30 lines, names no game, and it is the difference between the field being a plan and being a feature. The swap must set `owner` before `unique_name_in_owner` or `%ActionArt` stops resolving; `share_card_test.gd` covers both the install and the revert. |
-| 9 | `audio_manager.gd` | **Avoided** — the game synthesises its own SFX locally and plays them through the existing `play_sfx()` pool, rather than adding game-specific synthesis to the autoload the way Desk-Can-Saw did. Since revision 20 the *music* is game-owned too, for a different reason: the manager's players run with `PROCESS_MODE_ALWAYS` and outlive the scene that started them, which is right for a menu bed and wrong for a round's song, and `stop_music()` no-ops while a crossfade is in flight. Fixing that in the autoload would change what every other game's music does; a node in this game's scene ([`DmjTrackBed`]) changes nothing outside it. |
+| 9 | `audio_manager.gd` | **No framework change.** Existing SFX and menu cues remain available. `stop_music(0.0)` stops both inherited crossfade voices before soundcheck. The opening and rounds never request background music, so pause, replay and exit cannot resurrect a track. |
 | 10 | `default_bus_layout.tres` | **Avoided** — the Instrument bus is created at runtime (§4.3). |
 | 11 | Web MIDI shim, touch onset source | **Avoided as a framework change** — both are `NoteSource` files inside `games/dead_metal_jam/input/` (§4.7). Reaching a new platform costs the base nothing. |
 | 12 | `instructions_video_test.gd` — allow a game with no walkthrough clip | **Done.** The screen already supports this (`_setup_video()` hides the card and falls back to the single-column layout); only the test insisted every catalogued game ship footage, which made "add a game" mean "record a video first". The assertion now follows the code: declare a clip and it must be your own clip and poster, declare none and the card must give way to the text. Coverage went up, not down — two games must still ship clips. |
@@ -1720,30 +1701,18 @@ framework change.
   wrote down and a ramp nobody wrote are the same question from opposite ends,
   they must produce the identical plain data, and
   `_test_duration_matches_the_builder()` is the seam where that is checked.
-- `tests/round_music_test.gd` — the song's lifetime, which is the one thing
-  about the music a player notices when it is wrong. Four unit tests on
-  [`DmjTrackBed`] — that it is pausable and on the Music bus, that a null
-  stream is silence rather than an error, that holding keeps its place and
-  resuming returns to it, that a bed with nothing held stays quiet, and that
-  finishing clears the held position so a later resume cannot start a song
-  under a player who is no longer in a round. Then one scene-level test that
-  instantiates the *real* `gameplay.tscn` in a `SubViewport` and pauses,
-  resumes, closes the overlay and frees the scene, asserting silence after the
-  pause and after the exit. It deliberately lets the song run for 400 ms
-  before pausing: a round paused on its first millisecond cannot tell "came
-  back where it was" apart from "started the track over", and the assertion
-  would pass either way.
-  It also checks that no `AudioManager` player is holding the round's stream,
-  which is the exit bug stated directly rather than by proxy.
-  **Verified to have teeth** by mutation: dropping the `hold()` on pause,
-  dropping the `finish()` on exit-tree, dropping the resume, resuming with
-  `play(0.0)` instead of `play(from)`, and holding without recording the
-  position each fail it with the matching message. The distinction the scene
-  test rests on is an engine behaviour that was measured rather than assumed —
-  a pausable `AudioStreamPlayer` frozen by the tree reports `playing == false`
-  with `get_playback_position()` *intact*, whereas a real `stop()` returns it
-  to zero, so asserting zero is what separates "the round stopped it" from
-  "the engine merely muted it".
+- `tests/round_music_test.gd` — all mode/track combinations stop an actual
+  inherited music crossfade, create no music player, and remain music-free
+  through pause, resume, replay and exit. Legacy chart audio is deliberately
+  populated to prove it cannot be restarted. Hit SFX still reach the sound pool.
+- `tests/enemy_roster_test.gd` — echo shields, boss checkpoints, normalized
+  motifs, playable compiled deadlines, the four-wave practice introduction,
+  and overlapping phrases in all three modes.
+- `tests/three_d_combat_test.gd` — real perspective meshes, resized camera
+  framing, world-space shot endpoints, paused effects, immediate node budgets,
+  camera travel, reduced motion, room/model cleanup and the shipping scene.
+  With a rendering driver, `--capture-dir=<directory>` after `--` also saves
+  actual game frames from all three room styles.
 - Run `godot --headless --path . --import` after adding the `class_name`
   scripts, or the global class cache will not know them.
 - The tutorial clip is recorded through `tools/record_tutorials.ps1` with the
@@ -1850,7 +1819,7 @@ class_name JamChart extends Resource
     var title: String
     var artist: String
     var bpm: float
-    var audio: AudioStream                 # the track
+    var audio: AudioStream                 # legacy metadata only; never played
     var sections: Array[JamSection]
 
 class_name JamSection extends Resource
@@ -1879,31 +1848,31 @@ Mapping from the `README.md` JSON:
 | `notes.color`, `notes.text`, `borderRadius` | **Cut** — one fixed palette per game, declared in `game.cfg` (§9.9), not per note |
 | `author.*`, XML metadata | **Cut** — MVP charts are built in |
 
-**MVP content:** three hand-authored tracks, using audio generated the way the
-base project already generates all of its own audio — procedurally at runtime,
-or as small committed `.ogg` files. Three is enough to prove pacing and to give
-the achievements something to bite on.
+**Current content:** three authored note grids. Tempo supplies visual beat
+timing, not a background song. All charts include the four playable enemies.
 
 **As built, three tracks ship.**
 
-| Chart | Title | BPM | Key | Sections | Bots | Plated | Audio |
+| Chart | Title | BPM | Key | Sections | Bots | Plated | New enemies |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `track_01.tres` | Demo | 140 | E minor | 5 | 24 | 3 | `demo.ogg` (3:05) |
-| `track_02.tres` | Scrapyard Stomp | 100 | A minor | 5 | 24 | 3 | `track_02.ogg` (2:33) |
-| `track_03.tres` | Overdrive | 168 | E minor | 6 | 33 | 3 | `track_03.ogg` (2:33) |
+| `track_01.tres` | Demo | 140 | E minor | 5 | 24 | 3 | 1 Sentry, 1 Conductor |
+| `track_02.tres` | Scrapyard Stomp | 100 | A minor | 5 | 24 | 3 | 1 Sentry, 1 Conductor |
+| `track_03.tres` | Overdrive | 168 | E minor | 6 | 33 | 3 | 2 Sentries, 1 Conductor |
 
-Track 01's audio is a recording the author holds the rights to, trimmed to
-3:05. **Tracks 02 and 03 are generated**, by `tools/make_tracks.py`, which writes the `.ogg`
-*and* emits the `.tres` from one shared description of the song. That is the
-point of the tool: a chart and the music it is charted against are the same
-data seen twice, and the only reliable way to keep them in agreement is to stop
-maintaining them separately. Re-run it with `python tools/make_tracks.py`.
+`tools/make_tracks.py` regenerates charts 02 and 03 from their authored note
+grids. It does not write audio unless explicitly passed `--audio`, and never
+adds an audio reference to a chart. Existing recordings are retained as
+archival authoring material, not loaded by the opening or gameplay.
 
 **They are slow, medium and fast on purpose.** 100 / 140 / 168 BPM is the
 readable spread — the menu lists them by tempo and shows the number, because a
 player choosing a track on an instrument is choosing how fast they have to
 move. Scrapyard Stomp being the slowest is also why the tutorial is recorded
 against it (§9.5 row 14).
+
+**Historical audio authoring (before the 3D upgrade).** The following recording
+notes describe the retired backing tracks, not current playback requirements.
+The current chart tests instead require no audio reference and a complete roster.
 
 **How the tempo was verified, and the two ways that failed.** A generated bed
 still has to be *checked*, because a bug in the synthesiser would produce a
@@ -1970,20 +1939,14 @@ setting is the bot's wind-up. Zero means "use the section archetype", which is
 how nearly every beat should be written.
 
 **A phrase's wind-up is written into the plan, not widened at spawn.** The
-round length is derived from the plan (§2), so a Plated Knuckle that quietly
-gave itself more time at runtime would make the round timer lie. Both the chart
-compiler and `DmjTrackBuilder` call the same `PlatedKnuckle.windup_for()` and
-write the result down.
+round length is derived from the plan (§2). The compiler and practice builder
+use each enemy's `windup_for()` so all three-, two-, and four-hit demands fit
+their advertised deadline and the round timer.
 
-**Sections are not glued to the audio clock, and that is a deferral, not an
-oversight.** A wave ends when it is cleared and the rail advance in front of
-the next one is a fixed length, so real time drifts from track time as the
-player plays well — the audio is a *bed*, not a conductor. Syncing them needs
-the chart cursor to drive the spawner from `AudioStreamPlayer.get_playback_position()`,
-which is a different game to build and test than the one milestone 6 was for.
-The consequence is honest and small: intervals hold inside a section, and a
-section boundary may land off the bar. Every track is written long enough that
-a strong player reaches the end of the chart well before the end of the music.
+**Sections use the encounter clock, not audio playback.** Waves end when
+cleared and have a fixed rail advance before the next. Intervals hold within
+a section, Demo can hold indefinitely, and no music stream is needed to keep
+note judgement and visual beat cues in agreement.
 
 ---
 
@@ -2005,10 +1968,9 @@ means "not in this game".
 | **A game-owned lives system** | The base now ships lives as a shared round mode (§7). Rebuilding one here would mean two pools, two HUD readouts and a settings dial that fights *Settings → Game → Round mode*. Deleted from this design, not deferred. |
 | **Author metadata, avatars, MusicBrainz XML** | Only meaningful once charts are shareable. |
 | **Local multiplayer and CPU opponent** | One instrument, one player. `supports_multiplayer = false`. |
-| **Real 3D rail** | 2.5D in the existing 2D playfield keeps `gl_compatibility`, the `%Playfield` contract and the procedural-art approach the repo already uses — and it is what keeps the web and mobile targets cheap. |
 | **GDExtension / native pitch detector** | Pure GDScript first. Revisit only if profiling on the target machines actually fails. |
-| **Boss fight (The Conductor)** | MVP ends on a heavy final wave. A multi-phase boss needs a tuned move set the MVP will not have data for. |
-| **Silencer Sentry** | An enemy whose rule is an inversion of the core verb. Worth building, but only after the core verb is proven fun. |
+| **Multi-phase boss attacks** | The four-note Conductor is playable; additional attack phases remain deferred. |
+| **Silence-only enemies** | The playable Sentry uses repeated notes instead, keeping every kill tied to playing the instrument. |
 | **Life regeneration** | Needs difficulty data that does not exist yet, and a matching generic `_gain_life()` in the shell. |
 
 ### Simplified
@@ -2031,8 +1993,8 @@ means "not in this game".
 2. Web build: Web MIDI shim, gesture-gated audio unlock, thread-free detector
    budget.
 3. Chords on the MIDI path (Plated Knuckle becomes a chord enemy).
-4. The Conductor boss.
-5. Silencer Sentry.
+4. Additional Conductor attack phases.
+5. Silence-only enemy variants.
 6. `.jam` importer mapping the `README.md` JSON onto `JamChart`.
 7. Scale-relative chord notation.
 8. Life regeneration.

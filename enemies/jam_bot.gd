@@ -294,6 +294,28 @@ func roster_key() -> String:
 	return "jam_bot"
 
 
+func display_name() -> String:
+	return "RUSTY CLANKY"
+
+
+func instruction() -> String:
+	return "One matching note breaks its core. Any octave counts."
+
+
+func hit_label() -> String:
+	return "PLATE HIT"
+
+
+## The 3D renderer reads the encounter clock, never advances combat itself.
+func presentation_state() -> Dictionary:
+	return {
+		"time": _elapsed, "targeted": _targeted, "notes": _art_notes(),
+		"cursor": _art_cursor(), "hit_age": _feedback_age,
+		"death_age": _death_age(), "death_duration": _death_duration(),
+		"death_animated": _death_animated,
+	}
+
+
 ## How many more correct notes this bot needs before it goes down. One for most
 ## of the roster; a phrase counts what is left of itself.
 ##

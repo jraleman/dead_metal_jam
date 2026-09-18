@@ -492,7 +492,7 @@ func _check_room_is_fitted_while_the_round_waits(
 	game: Node, viewport: SubViewport
 ) -> void:
 	var director: EncounterDirector = game.get("_director")
-	var rail: DmjRail = director.get_node("Rail")
+	var arena: DmjArena3D = game.get("_arena")
 	var was_active := bool(game.get("_round_active"))
 	game.set("_round_active", false)
 	for dimensions: Vector2i in [Vector2i(1920, 1080), Vector2i(1280, 720)]:
@@ -500,7 +500,7 @@ func _check_room_is_fitted_while_the_round_waits(
 		for _frame in range(3):
 			await process_frame
 		var play_area: Rect2 = game.call("_playfield_bounds")
-		var room: Rect2 = rail.get("_field")
+		var room := Rect2(arena.position, arena.size)
 		_check(
 			room.is_equal_approx(play_area),
 			"A round on screen but not yet advancing still fills the %s play "
@@ -579,13 +579,17 @@ func _check_console_feedback(game: Node, console: DmjPerformanceHud) -> void:
 		"Practice tracks and mode changes have honest metadata."
 	)
 
-	var rail: DmjRail = director.get_node("Rail")
+	var arena: DmjArena3D = game.get("_arena")
 	game.call("_set_reduced_motion_enabled", true)
-	_check(bool(rail.get("_reduced_motion")), "Reduced motion reaches the live rail immediately.")
+	_check(bool(arena.get("_reduced_motion")), "Reduced motion reaches the live 3D camera immediately.")
 	game.call("_set_reduced_motion_enabled", false)
-	director.flash_rail(1.0)
+	game.call("_set_intense_effects_enabled", true)
+	arena.shots.player_shot(Vector3(0, 2, -5), false, 60, Vector3.ZERO)
 	game.call("_set_intense_effects_enabled", false)
-	_check(is_zero_approx(float(rail.get("_flash"))), "Switching effects off clears the live flare.")
+	_check(
+		not arena.shots.motion_enabled() and (arena.shots.get("_particles") as Array).is_empty(),
+		"Switching effects off clears live 3D particles and recoil."
+	)
 
 
 func _check_console_layouts(

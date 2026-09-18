@@ -34,7 +34,7 @@ extends Resource
 ## in beat order so a hand-written chart never has to think about staging.
 @export var lane := -1
 
-## Roster key (§8.2): `rusty_clanky` or `plated_knuckle`.
+## Roster: rusty_clanky, plated_knuckle, silencer_sentry, conductor.
 @export var enemy := "rusty_clanky"
 
 

@@ -124,6 +124,8 @@ const BOB_BLEND := 4.0
 ## chart typo costs the wrong enemy rather than an empty wave.
 const ENEMY_RUSTY_CLANKY := "rusty_clanky"
 const ENEMY_PLATED_KNUCKLE := "plated_knuckle"
+const ENEMY_SILENCER_SENTRY := "silencer_sentry"
+const ENEMY_CONDUCTOR := "conductor"
 
 ## Rhythm mode makes every drone accept any note (§3, §8.3). It is a flag on
 ## the rules, not a separate code path.
@@ -178,6 +180,7 @@ var _time_stopped := false
 var _bob_phase := 0.0
 var _bob_weight := 0.0
 var _bob := Vector2.ZERO
+var _world_time := 0.0
 
 
 ## The rail is built here rather than by `gameplay.gd` because the director
@@ -213,6 +216,7 @@ func set_track(waves: Array) -> void:
 ## Starts the track from the top. Safe to call again to restart a round.
 func begin() -> void:
 	_wave_index = -1
+	_world_time = 0.0
 	_time_stopped = false
 	_clear_drones()
 	if _track.is_empty():
@@ -320,6 +324,7 @@ func _advance_step(delta: float, field: Rect2) -> void:
 		stop_time and _phase == Phase.ENCOUNTER and _beat_is_waiting()
 	)
 	var step := 0.0 if _time_stopped else delta
+	_world_time += step
 
 	match _phase:
 		Phase.ADVANCING:
@@ -452,6 +457,7 @@ func resolve_note(
 		# changes the field (§8.3).
 		for drone in live:
 			drone.on_wrong_note()
+		_mark_front_target()
 		return _judgement(
 			Judgement.WRONG_NOTE, Tier.OUTSIDE, null, 0.0, -wrong_note_penalty
 		)
@@ -485,6 +491,7 @@ func resolve_note(
 	judgement["shot_position"] = shot_position
 	judgement["shot_scale"] = shot_scale
 	judgement["shot_ground"] = shot_ground
+	_mark_front_target()
 	if killed:
 		drone_killed.emit(target, judgement)
 	return judgement
@@ -590,6 +597,25 @@ func is_finished() -> bool:
 ## the HUD's "next note" hint.
 func live_drones() -> Array[JamBot]:
 	return _live_drones()
+
+
+func staged_drones() -> Array[JamBot]:
+	return _drones.duplicate()
+
+
+func arena_index() -> int:
+	return maxi(_upcoming_index() if _phase == Phase.ADVANCING else _wave_index, 0)
+
+
+func travel_progress() -> float:
+	return (
+		clampf(_advance_elapsed / maxf(_advance_seconds, 0.001), 0.0, 1.0)
+		if _phase == Phase.ADVANCING else 1.0
+	)
+
+
+func world_time() -> float:
+	return _world_time
 
 
 func wave_number() -> int:
@@ -717,7 +743,10 @@ func _spawn(plan: Dictionary) -> void:
 func _free_firing_slot(lane: int) -> int:
 	var occupied: Array[int] = []
 	for drone in _drones:
-		if is_instance_valid(drone) and drone.lane == lane and drone.occupies_firing_slot():
+		if (
+			is_instance_valid(drone) and drone.arena_index == _wave_index
+			and drone.lane == lane and drone.occupies_firing_slot()
+		):
 			occupied.append(drone.firing_slot)
 	var slot := 0
 	while occupied.has(slot):
@@ -731,14 +760,25 @@ func _build_bot(
 	approach: float,
 	windup: float
 ) -> JamBot:
-	if str(plan.get("enemy", ENEMY_RUSTY_CLANKY)) == ENEMY_PLATED_KNUCKLE:
+	var enemy := str(plan.get("enemy", ENEMY_RUSTY_CLANKY))
+	var phrase: Variant = plan.get("notes", [])
+	var sequence: Array = phrase if phrase is Array and not (phrase as Array).is_empty() else [
+		int(plan.get("note", -1))
+	]
+	if enemy == ENEMY_PLATED_KNUCKLE:
 		var knuckle := PlatedKnuckle.new()
-		var phrase: Variant = plan.get("notes", [])
-		var sequence: Array = phrase if phrase is Array and not (phrase as Array).is_empty() else [
-			int(plan.get("note", -1))
-		]
 		knuckle.configure_sequence(lane, sequence, approach, windup)
 		return knuckle
+	if enemy == ENEMY_SILENCER_SENTRY:
+		var sentry := SilencerSentry.new()
+		sentry.configure_echo(lane, int(plan.get("note", -1)), approach, windup)
+		return sentry
+	if enemy == ENEMY_CONDUCTOR:
+		var conductor := DmjConductor.new()
+		conductor.configure_motif(lane, sequence, approach, windup)
+		return conductor
+	if enemy != ENEMY_RUSTY_CLANKY:
+		push_warning("Dead Metal Jam: unknown enemy '%s'; using Rusty Clanky." % enemy)
 
 	var clanky := RustyClanky.new()
 	clanky.configure(lane, int(plan.get("note", -1)), approach, windup)
@@ -782,8 +822,8 @@ func _wave_is_over() -> bool:
 	return _live_drones().is_empty()
 
 
-## Jam prioritizes the next gunshot. The practice modes keep their established
-## lead-in ordering so Demo holds the same demand that its readout names.
+## Jam prioritizes gunshots; practice prioritizes the next unanswered beat.
+## A partially answered phrase must not hold Demo past another bot's first beat.
 func _live_drones() -> Array[JamBot]:
 	var live: Array[JamBot] = []
 	for drone in _drones:
@@ -793,7 +833,7 @@ func _live_drones() -> Array[JamBot]:
 		func(a: JamBot, b: JamBot) -> bool:
 			if arcade_shots:
 				return a.time_until_fire() < b.time_until_fire()
-			return a.approach_progress() > b.approach_progress()
+			return a.time_to_beat() > b.time_to_beat()
 	)
 	return live
 

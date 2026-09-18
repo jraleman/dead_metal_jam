@@ -38,44 +38,38 @@ There are three modes available:
 - Jam: arcade shooting; correct notes connect before the enemy fires, and beat timing earns bonuses.
 
 
-### Arcade firefights
+### Real 3D firefights
 
-Your instrument fires note-colored energy shots, automatically aimed at the matching drone
-with the soonest attack deadline. Impacts distinguish **DOWN**, **PLATE HIT**,
-and **MISS**; missed shots hit scenery instead of pretending to damage robots.
-Enemy arm cannons return red shots toward your amplifier.
+The game is now a **3D on-rails shooter**: a perspective camera travels through
+mesh-built Loading Bay, Turbine Hall, and Reactor Deck rooms. Robots, armor,
+weapons, tracers and debris occupy the same lit 3D world. Animated turbines,
+reactor rings, shadows and cargo give the rooms distinct identities. The
+opening and share artwork use the same 3D models.
 
-Drones quickly deploy to firing positions rather than walking toward the
-camera. Filling **attack bars** show when they will shoot, without numeric
-countdowns. The closing target ring and the HUD's **ON BEAT** cue show the bonus window.
-Loading Bay, Turbine Hall, and Reactor Deck give each encounter a distinct
-industrial setting, with room transitions instead of a scrolling treadmill.
-Hits rock the armor and throw sparks. Kills erupt into large amber-white
-fireballs with additive glow, note-colored shock rims, and longer-lived sparks,
-smoke and tumbling metal. The blast grows quickly and holds its bright core
-instead of fading before it becomes visible; floor shockwaves light the deck
-beneath it. The amplifier recoils and ejects casings, and clear **DOWN** labels
-stay above the blast.
+Your instrument is still the only control you need. Play a matching note in
+any octave to fire at the matching robot with the soonest attack deadline;
+there is no mouse aiming or movement-key requirement. Note letters and colors
+on the cores, phrase previews, filling **attack bars**, closing beat rings and
+the HUD's **ON BEAT** cue explain what to play and when.
 
-Both playable drones have a **0.9-second destruction animation**: an impact
-kick, followed by separately spinning heads, arms, legs and armor plates that
-settle and fade. Wreckage cannot be targeted or hold the next wave's firing bay,
-and the animation keeps playing during Demo's held beat. Results allow the
-final breakup to finish instead of covering it early. Misses and nonlethal
-plate hits retain their shorter feedback.
+There is **no background music**, including the opening, practice, and all
+charted tracks. The note patterns and visual timing cues remain; your
+instrument supplies the music. Short hit, miss, menu and tutorial note cues
+still respect the SFX controls. Music inherited from another scene is stopped
+before microphone calibration, and cannot restart on pause, resume or replay.
 
-Beveled armor, shaded joints and soft contact shadows give the drones more
-depth. Feathered stage-light shafts sweep through drifting dust, foreground
-steelwork adds subtle parallax, and bladed turbines and orbiting reactor rings
-bring the rooms to life. The opening and share artwork reuse the same improved
-scenery and drone surfaces. Everything remains procedural **2.5D** in the
-existing compatibility renderer, without 3D scenes or new asset dependencies.
+Hits recoil the armor and throw sparks. Correct notes produce **DOWN**,
+**PLATE HIT**, **SHIELD BROKEN**, or **CHECKPOINT** feedback; misses strike
+scenery. Enemy cannons fire red shots at your amplifier. Destroyed chassis
+break apart over **0.9 seconds**, including while Demo holds its next beat.
+Results leave time for the final breakup; wreckage never occupies a new room.
 
-Effects are bounded even during rapid MIDI input. Reduced motion or disabled
-effects keeps static shot paths, colors and outcome markers without recoil,
-flashes or particles; stage lights and machinery hold still. Switching effects
-back on animates new shots rather than replaying earlier explosions or deaths.
-With motion suppressed, destroyed drones keep their short, simple fade.
+The 3D world runs in an isolated `SubViewport` inside the existing 2D HUD,
+using Godot's **GL Compatibility** renderer with no new asset dependencies.
+At most two rooms, 32 shots and 128 debris particles are retained. Reduced
+motion or disabled effects removes camera travel, recoil, flashes and
+particles while preserving readable notes, attack bars and static shot
+outcomes. Turning effects back on does not replay old explosions.
 
 ### Notes and armor
 
@@ -88,6 +82,19 @@ visible so recognizing a color is never required.
 **Plated Knuckle always has three plates and takes three correct notes in
 order.** A wrong note resets all three, as before. Older short phrases cycle
 to three notes (C-E becomes C-E-C); longer phrases use their first three notes.
+
+| Enemy | How to defeat it |
+| --- | --- |
+| **Rusty Clanky** | One matching note breaks its core. |
+| **Plated Knuckle** | Play three notes in order; a wrong note restores its armor. |
+| **Silencer Sentry** | Repeat the same note twice: shatter its shield, then hit its core. The shield stays broken after a wrong note. |
+| **The Conductor** | Play a four-note phrase. Each completed pair is a checkpoint, so mistakes restart only the unfinished pair. |
+
+All three authored tracks include the new enemies. Practice introduces one-note
+robots first, echo shields in wave two, armor in wave three, and a Conductor
+in wave four. Demo and Rhythm focus the **next unanswered beat**, even when
+phrases overlap, so an enemy's first note cannot become stranded behind
+another enemy's later notes.
 
 
 ### Lives and the amplifier
@@ -104,19 +111,26 @@ lives, and saved choices take priority over this game's default. Other games
 keep their existing default. Reduced motion disables tube animation.
 
 
-## Drone artwork
+## Drone artwork and authoring
 
-The concept-based drones are drawn procedurally, with dynamic note plates.
-Rusty Clanky and Plated Knuckle use the new artwork in gameplay.
-Silencer Sentry and The Conductor are art previews only; their mechanics
-are not enabled.
+Playable meshes live in `enemies/drone_3d.gd`; rooms and camera presentation
+live in `encounter/room_3d.gd` and `encounter/arena_3d.gd`. The original
+procedural 2D drawings remain as an archival concept-art workshop, not the
+gameplay renderer. All four enemy types are now playable.
 
 In the base Godot project, open `ui/drone_gallery.tscn` from this game folder
 and run the scene with **F6** to inspect all four. The gallery can cycle
 notes and plates, show charge poses, and pause animation. It also respects
 the game's reduced-motion setting.
 
+`python tools\make_tracks.py` regenerates the two authored note grids without
+audio references. `--audio` explicitly opts into rebuilding archival audio;
+those files are never used as a backing track.
+
 ## .JAM files
+
+This is the original package-format design. The playable game currently uses
+the `.tres` note charts in `chart\charts`; audio metadata is not played.
 
 Located inside the package (.jam), you will find:
 

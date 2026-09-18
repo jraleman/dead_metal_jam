@@ -1,6 +1,5 @@
 [gd_resource type="Resource" script_class="JamChart" format=3]
 
-[ext_resource type="AudioStream" path="res://games/dead_metal_jam/assets/demo.ogg" id="1_24688"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_chart.gd" id="2_d67e6"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_section.gd" id="3_r4rt6"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_beat.gd" id="4_to7pb"]
@@ -44,6 +43,7 @@ note = 59
 script = ExtResource("4_to7pb")
 time = 13.714
 note = 45
+enemy = "silencer_sentry"
 
 [sub_resource type="Resource" id="Resource_j7brl"]
 script = ExtResource("4_to7pb")
@@ -155,6 +155,8 @@ note = 59
 script = ExtResource("4_to7pb")
 time = 47.571
 note = 64
+notes = Array[int]([64, 59, 55, 40])
+enemy = "conductor"
 
 [sub_resource type="Resource" id="Resource_rv1kj"]
 script = ExtResource("3_r4rt6")
@@ -167,5 +169,4 @@ script = ExtResource("2_d67e6")
 title = "Demo"
 artist = "DeskCanSaw"
 bpm = 140.0
-audio = ExtResource("1_24688")
 sections = Array[ExtResource("3_r4rt6")]([SubResource("Resource_rmest"), SubResource("Resource_pg6jo"), SubResource("Resource_n6fry"), SubResource("Resource_nowme"), SubResource("Resource_rv1kj")])

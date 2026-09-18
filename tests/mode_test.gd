@@ -263,10 +263,8 @@ func _test_leaving_demo_unfreezes_the_world() -> void:
 ## window, and the world does not move. This is the test that stops
 ## `_beat_is_waiting()` from quietly growing into "any bot that is waiting".
 ##
-## The arrangement is the one case where the two differ. A phrase that has just
-## had a plate broken is front-most but *not* waiting — its next plate is
-## 0.8 s out — while a single-note bot behind it reaches its beat inside that
-## gap.
+## A phrase's next plate must yield focus to another bot whose beat comes first,
+## or overlapping phrases can strand Demo on an already missed beat.
 func _test_demo_only_waits_for_the_bot_on_screen() -> void:
 	var director := _mode_director(
 		EncounterDirector.Mode.DEMO,
@@ -282,8 +280,6 @@ func _test_demo_only_waits_for_the_bot_on_screen() -> void:
 		"The first plate takes the note it asked for."
 	)
 
-	# Into the plate gap, and far enough that the bot behind is clearly past
-	# its beat rather than sitting on it to the microsecond.
 	_run(director, 0.45)
 	var live := director.live_drones()
 	_check(live.size() == 2, "Both robots are still up.")
@@ -291,14 +287,22 @@ func _test_demo_only_waits_for_the_bot_on_screen() -> void:
 	var front := live[0]
 	var behind := live[1]
 	_check(
-		front.roster_key() == "plated_knuckle",
-		"The phrase is still the one on screen."
+		front.roster_key() == "rusty_clanky",
+		"The readout switches to the next unanswered beat between plates."
 	)
-	_check(front.time_to_beat() < 0.0, "It is between plates, so not waiting.")
-	_check(behind.time_to_beat() >= 0.0, "The bot behind has reached its beat.")
+	_check(front.time_to_beat() >= 0.0, "The shown bot is waiting on its beat.")
+	_check(behind.time_to_beat() < 0.0, "The phrase's next plate is still ahead.")
 	_check(
-		not director.is_time_stopped(),
-		"The world does not hold for a demand the screen is not making."
+		director.is_time_stopped(),
+		"Demo holds the beat now shown by the readout and reticle."
+	)
+	_check(
+		_kind(director.resolve_note(55 % 12, 1)) == EncounterDirector.Judgement.HIT,
+		"The interleaved beat is answerable rather than stranded behind a phrase."
+	)
+	_check(
+		director.live_drones()[0] == behind and bool(behind.presentation_state()["targeted"]),
+		"Answering the interleaved beat immediately restores the phrase's reticle."
 	)
 	director.free()
 

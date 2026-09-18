@@ -38,10 +38,9 @@ func _init() -> void:
 func _run() -> void:
 	_test_sounds_are_audible()
 	_test_pitch_is_standard()
-	_test_backing_track_is_a_bed()
 	_test_manifest_declares_the_intro()
 	await _test_timeline()
-	await _test_music_starts_with_the_scene()
+	await _test_opening_has_no_background_music()
 	await _test_reduced_motion_reaches_the_actors()
 	_finish()
 
@@ -82,33 +81,6 @@ func _test_pitch_is_standard() -> void:
 		absf(DmjIntroSound.frequency(81) - 880.0) < 0.01,
 		"An octave up must double the frequency."
 	)
-
-
-## The opening's backing track is a bed, not a loop.
-##
-## The opening is nine seconds long and the track is minutes long, so nothing
-## on screen would ever reveal a loop flag left on — it would only show up
-## much later, in whatever scene inherited the still-playing stream. Checked
-## here because looping is set by the `.import`, which no other test reads.
-func _test_backing_track_is_a_bed() -> void:
-	var script := load(INTRO_SCENE) as PackedScene
-	var intro := script.instantiate() if script else null
-	if intro == null:
-		_failures.append("The opening must instantiate to be checked.")
-		return
-
-	var music: AudioStream = intro.get("music")
-	_expect(music != null, "The opening must carry a backing track.")
-	if music != null:
-		_expect(
-			not bool(music.get("loop")),
-			"The opening's backing track must not loop."
-		)
-		_expect(
-			music.get_length() >= 9.0,
-			"It must outlast the opening it plays under."
-		)
-	intro.free()
 
 
 func _peak(stream: AudioStreamWAV) -> float:
@@ -154,15 +126,14 @@ func _test_timeline() -> void:
 		return
 
 	_expect(drones.get_child_count() == 0, "The opening must start on an empty stage.")
-	var rail := intro.get("_rail") as DmjRail
-	_expect(rail != null, "The opening shares the playable corridor.")
-	if rail != null:
-		var field: Rect2 = intro.call("_drone_field")
+	var arena := intro.get("_arena") as DmjArena3D
+	_expect(arena != null and arena.camera != null, "The opening shares the playable 3D world.")
+	if arena != null:
+		intro.call("_process", 0.0)
 		var card: Control = intro.get_node("%Card")
 		_expect(
-			(field.position.y - DmjRail.BACKDROP_PADDING) * rail.scale.y
-			>= card.get_global_rect().end.y,
-			"The corridor backdrop must not crowd the narration."
+			arena.position.y >= card.get_global_rect().end.y,
+			"The 3D viewport must not crowd the narration."
 		)
 
 	_advance(intro, 2.0)
@@ -217,37 +188,21 @@ func _test_timeline() -> void:
 	await process_frame
 
 
-## The bed starts with the scene, not on a cue part-way through it.
-##
-## `_start_music()` is one line and looks impossible to get wrong, but it is
-## the only thing standing between the opening and silence: it is reached
-## through `_ready`, and the two lines above it read Settings and can throw the
-## whole method away on a machine where they fail. Playing is checked, not
-## called.
-func _test_music_starts_with_the_scene() -> void:
+func _test_opening_has_no_background_music() -> void:
 	var audio := get_root().get_node_or_null("AudioManager")
 	if audio == null:
 		_failures.append("AudioManager must be available to the intro test.")
 		return
 
+	audio.call("play_music", DmjIntroSound.note_ping(48, 4.0), 1.0)
 	var intro := await _open_intro()
 	if intro == null:
 		return
 	await _settle()
 
-	var playing: Array[AudioStream] = []
-	for child in audio.get_children():
-		var player := child as AudioStreamPlayer
-		if player != null and player.playing and player.stream != null:
-			playing.append(player.stream)
-
-	# Membership, not "something is playing": the manager's SFX pool lives in
-	# the same list, and a stray ping from the cue before this one would
-	# otherwise answer for the music.
-	_expect(not playing.is_empty(), "The opening must leave audio running.")
 	_expect(
-		playing.has(intro.get("music")),
-		"And the opening's own backing track must be one of the streams playing."
+		not bool(audio.call("is_music_playing")),
+		"The opening stops inherited music and never starts a backing track."
 	)
 
 	audio.call("stop_music", 0.05)

@@ -196,12 +196,13 @@ func _test_share_art_bounds() -> void:
 	for dimensions: Vector2 in [Vector2(240, 290), Vector2(640, 360), Vector2(320, 180)]:
 		card.size = dimensions
 		card.call("_refresh_corridor")
-		var portraits: Array = card.get("_portraits")
-		for art: DmjDroneArt in portraits:
-			var bounds: Rect2 = art.transform * art.framed_bounds()
+		var arena: DmjArena3D = card.get("_arena")
+		var actors: Array = card.get("_actors")
+		for actor: JamBot in actors:
+			var point := arena.camera.unproject_position(arena.aim_point(actor))
 			_check(
-				Rect2(Vector2.ZERO, dimensions).encloses(bounds),
-				"Share portraits keep their weapons and note plates inside the artwork frame."
+				Rect2(Vector2.ZERO, dimensions).has_point(point),
+				"The shared 3D camera keeps each called note inside the artwork frame."
 			)
 	card.free()
 
@@ -272,7 +273,7 @@ func _test_gameplay_shots() -> void:
 		await process_frame
 		await process_frame
 		game.set_process(false)
-		var fx: DmjShotFx = game.get("_shot_fx")
+		var fx: DmjShotFx3D = game.get("_shot_fx")
 		fx.set_process(false)
 		var director: EncounterDirector = game.get("_director")
 		var router: NoteRouter = game.get("_router")
@@ -317,10 +318,11 @@ func _test_gameplay_shots() -> void:
 			and shots.back()["color"] == DmjPalette.note_color(48),
 			"A real musical input produces a plate-hit tracer and advances the phrase."
 		)
-		var ground: Vector2 = fx.call("_point", shots.back()["ground"])
+		var ground: Vector3 = shots.back()["ground"]
+		var arena: DmjArena3D = game.get("_arena")
 		_check(
-			ground.is_equal_approx(director.live_drones()[0].position),
-			"The real gameplay path supplies the floor position for the impact light."
+			ground.is_equal_approx(arena.ground_point(director.live_drones()[0])),
+			"The real gameplay path supplies the 3D floor position for the impact light."
 		)
 		game.call("_update_target_readout")
 		_check(
@@ -392,12 +394,17 @@ func _test_final_kill_settle(game: Node) -> void:
 	game.call("_set_reduced_motion_enabled", false)
 	game.call("_set_intense_effects_enabled", true)
 	var director: EncounterDirector = game.get("_director")
-	var fx: DmjShotFx = game.get("_shot_fx")
+	var fx: DmjShotFx3D = game.get("_shot_fx")
 	var router: NoteRouter = game.get("_router")
 	director.set_track([{"advance": 0.0, "drones": [_plan(1, 52, 0.0, 3.0, 2.0)]}])
 	director.begin()
 	game.call("_update_round", STEP, 60.0)
 	var drone := director.live_drones()[0]
+	var arena: DmjArena3D = game.get("_arena")
+	var model := arena.model_for(drone)
+	var pieces: Array = model.get("_pieces")
+	var first_piece: Node3D = pieces[0]
+	var original := first_piece.transform
 	router.note_started.emit(NoteEvent.make(52, NoteEvent.Source.KEYBOARD))
 	fx.set_process(false)
 	game.call("_update_round", STEP, 60.0)
@@ -407,18 +414,19 @@ func _test_final_kill_settle(game: Node) -> void:
 		fx.advance(STEP)
 		drone.advance_feedback(STEP)
 		game.call("_update_round", STEP, 60.0)
-	var art: DmjDroneArt = drone.get_node("Art")
+	var pose := drone.presentation_state()
 	_check(
-		bool(game.get("_round_active")) and art.destruction_age > 0.4 and art.self_modulate.a > 0.9,
-		"The last drone visibly breaks apart rather than disappearing behind results."
+		bool(game.get("_round_active")) and float(pose["death_age"]) > 0.4
+		and not first_piece.transform.is_equal_approx(original),
+		"The last mesh chassis breaks apart rather than disappearing behind results."
 	)
-	var age := art.destruction_age
+	var age: float = pose["death_age"]
 	director.refresh_layout(Rect2(0.0, 0.0, 320.0, 180.0))
 	game.call("_update_round", 0.0, 60.0)
 	var field: Rect2 = game.call("_playfield_bounds")
 	var room: Rect2 = director.get_node("Rail").get("_field")
 	_check(
-		room.is_equal_approx(field) and is_equal_approx(art.destruction_age, age),
+		room.is_equal_approx(field) and is_equal_approx(float(drone.presentation_state()["death_age"]), age),
 		"Pending results still fit the room to the viewport without advancing the breakup clock."
 	)
 	for frame in range(ceili(hold / STEP) + 2):

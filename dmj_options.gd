@@ -71,8 +71,7 @@ const CHART_PATHS := {
 	TRACK_SONG_03: "res://games/dead_metal_jam/chart/charts/track_03.tres",
 }
 
-## Menu order: the three songs by tempo, then the ramp. The titles are the
-## songs' own, because a player picking a track is picking music.
+## The three authored note grids by tempo, then the generated practice ramp.
 const TRACK_CHOICES: Array[Dictionary] = [
 	{"value": TRACK_SONG, "title": "Demo — 140 BPM"},
 	{"value": TRACK_SONG_02, "title": "Scrapyard Stomp — 100 BPM"},
@@ -132,9 +131,9 @@ const TUNABLES: Array[Dictionary] = [
 		"default": DEFAULT_TRACK,
 		"title": "Track",
 		"description": (
-			"Each song is charted: named sections, a new firing position between "
-			+ "them, and armoured robots that ask for a phrase. The practice "
-			+ "ramp just keeps sending waves."
+			"Choose a note pattern, not a backing song: there is no background music. "
+			+ "Fight through 3D rooms, echo shields and phrase bosses. "
+			+ "The practice ramp introduces each enemy gradually."
 		),
 		"heading": TRACK_HEADING,
 		"choices": TRACK_CHOICES,

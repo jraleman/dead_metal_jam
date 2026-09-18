@@ -39,6 +39,8 @@ const MAX_WAVE_DRONES := 6
 ## else. An enemy that demands reading ahead is not the thing to meet before
 ## the one that demands one note (§8.2).
 const PHRASE_FROM_WAVE := 2
+const SENTRY_FROM_WAVE := 1
+const CONDUCTOR_FROM_WAVE := 3
 
 ## Notes in a practice phrase. The plated enemy is always three hits, even in
 ## practice, so the builder authors to the same fixed requirement the runtime
@@ -79,9 +81,13 @@ static func _build_wave(
 	var approach := maxf(
 		APPROACH_SECONDS - float(wave_index) * 0.2, MIN_APPROACH_SECONDS
 	)
-	# One phrase per wave once the ramp has taught the core verb, and always
-	# the last bot in the wave so the player meets it having already scored.
-	var phrase_slot := count - 1 if wave_index >= PHRASE_FROM_WAVE else -1
+	var boss_slot := (
+		count - 1 if wave_index >= CONDUCTOR_FROM_WAVE and wave_index % 3 == 0 else -1
+	)
+	var phrase_slot := (
+		count - (2 if boss_slot >= 0 else 1) if wave_index >= PHRASE_FROM_WAVE else -1
+	)
+	var sentry_slot := 1 if wave_index >= SENTRY_FROM_WAVE else -1
 
 	var drones: Array = []
 	var previous_note := -1
@@ -100,22 +106,31 @@ static func _build_wave(
 			"windup": WINDUP_SECONDS,
 			"enemy": EncounterDirector.ENEMY_RUSTY_CLANKY,
 		}
-		if slot == phrase_slot and note_pool.size() > 1:
+		if slot == phrase_slot or slot == boss_slot:
+			var is_boss := slot == boss_slot
 			var phrase: Array[int] = [note]
-			for _step in range(PHRASE_NOTES - 1):
+			var phrase_size := DmjConductor.MOTIF_NOTES if is_boss else PHRASE_NOTES
+			for _step in range(phrase_size - 1):
 				var next_note := _pick_note(note_pool, previous_note, rng)
 				previous_note = next_note
 				phrase.append(next_note)
-			phrase = PlatedKnuckle.normalize_sequence(phrase, note)
-			plan["enemy"] = EncounterDirector.ENEMY_PLATED_KNUCKLE
+			plan["enemy"] = (
+				EncounterDirector.ENEMY_CONDUCTOR if is_boss
+				else EncounterDirector.ENEMY_PLATED_KNUCKLE
+			)
 			plan["notes"] = phrase
 			# The plan carries the real wind-up rather than letting the bot
 			# widen it at spawn, because the round length is read from the plan
 			# (§2) and a wind-up that only exists at runtime would make the
 			# round timer lie.
 			plan["windup"] = maxf(
-				WINDUP_SECONDS, PlatedKnuckle.windup_for(phrase.size())
+				WINDUP_SECONDS,
+				DmjConductor.windup_for() if is_boss else PlatedKnuckle.windup_for(phrase.size())
 			)
+		elif slot == sentry_slot:
+			plan["enemy"] = EncounterDirector.ENEMY_SILENCER_SENTRY
+			plan["notes"] = [note, note]
+			plan["windup"] = maxf(WINDUP_SECONDS, SilencerSentry.windup_for())
 		drones.append(plan)
 
 	return {

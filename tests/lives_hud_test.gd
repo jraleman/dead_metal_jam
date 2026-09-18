@@ -54,10 +54,17 @@ func _test_defaults() -> void:
 	_values.erase(Settings.ROUND_MODE_KEY)
 	for manifest in GameCatalog.all():
 		GameCatalog.select(manifest.id)
-		var expected := Settings.RoundMode.LIVES if manifest.id == GAME_ID else Settings.RoundMode.TIMER
+		# Read the rule from the manifest rather than naming the games that
+		# use it: several already default to lives, and a new one must not
+		# have to edit this test to be allowed its own default.
+		var expected := (
+			Settings.RoundMode.LIVES
+			if manifest.default_lives_mode
+			else Settings.RoundMode.TIMER
+		)
 		_check(
 			int(_settings.call("round_mode")) == expected,
-			"Only Dead Metal Jam changes its default: %s." % manifest.id
+			"An unset preference falls back to what %s declares." % manifest.id
 		)
 		_check(
 			int(_settings.call("get_value", Settings.ROUND_MODE_KEY)) == expected,

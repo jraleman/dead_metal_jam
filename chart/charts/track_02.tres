@@ -1,6 +1,5 @@
 [gd_resource type="Resource" script_class="JamChart" format=3]
 
-[ext_resource type="AudioStream" path="res://games/dead_metal_jam/assets/track_02.ogg" id="1_audio"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_chart.gd" id="2_chart"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_section.gd" id="3_section"]
 [ext_resource type="Script" path="res://games/dead_metal_jam/chart/jam_beat.gd" id="4_beat"]
@@ -44,6 +43,7 @@ note = 48
 script = ExtResource("4_beat")
 time = 19.2
 note = 50
+enemy = "silencer_sentry"
 
 [sub_resource type="Resource" id="Beat_1_3"]
 script = ExtResource("4_beat")
@@ -155,6 +155,8 @@ note = 55
 script = ExtResource("4_beat")
 time = 61.8
 note = 57
+notes = Array[int]([57, 55, 52, 45])
+enemy = "conductor"
 
 [sub_resource type="Resource" id="Section_4"]
 script = ExtResource("3_section")
@@ -167,5 +169,4 @@ script = ExtResource("2_chart")
 title = "Scrapyard Stomp"
 artist = "DeskCanSaw"
 bpm = 100
-audio = ExtResource("1_audio")
 sections = Array[ExtResource("3_section")]([SubResource("Section_0"), SubResource("Section_1"), SubResource("Section_2"), SubResource("Section_3"), SubResource("Section_4")])

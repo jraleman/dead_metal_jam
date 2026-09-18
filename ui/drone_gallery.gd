@@ -5,10 +5,10 @@ const PROFILES := [
 	["Rusty Clanky", "IN GAME", "Rattling scrap, a crooked grin, and one called note. One note, one hit."],
 	["Plated Knuckle", "IN GAME", "Three note-colored plates, three hits in order. A wrong note resets all three."],
 	[
-		"Silencer Sentry", "ART PREVIEW",
-		"A hovering rotor and a stitched-shut grille. Its silence mechanic is not enabled.",
+		"Silencer Sentry", "3D ENEMY / CONCEPT ART",
+		"Two strikes of the same note: shield, then core. A broken shield stays broken.",
 	],
-	["The Conductor", "ART PREVIEW", "A wheeled amplifier, top hat, and conducting baton. Boss phases are not enabled."],
+	["The Conductor", "3D ENEMY / CONCEPT ART", "Four notes in order, with a checkpoint after each pair. The playable version uses a mesh chassis."],
 ]
 const PHRASES := [[47], [48, 52, 55], [], [69, 72, 76, 74]]
 const CLANKY_NOTES := [47, 48, 50, 52, 55]

@@ -292,13 +292,13 @@ func _test_gallery() -> void:
 	var sentry_card: Node = gallery.get_node("%SentryCard")
 	var boss_card: Node = gallery.get_node("%ConductorCard")
 	_check(
-		sentry_card.get_node("%DroneStatus").text == "ART PREVIEW"
-		and boss_card.get_node("%DroneStatus").text == "ART PREVIEW",
-		"The two future enemies are explicitly labeled as previews."
+		sentry_card.get_node("%DroneStatus").text == "3D ENEMY / CONCEPT ART"
+		and boss_card.get_node("%DroneStatus").text == "3D ENEMY / CONCEPT ART",
+		"The gallery distinguishes original concept drawings from playable 3D enemies."
 	)
 	gallery.call("_on_cycle_notes_pressed")
 	_check(artists[1].current_note() == 52, "The gallery can preview the next armor plate.")
-	_check(artists[2].current_note() == -1, "The silencer never invents a required note.")
+	_check(artists[2].current_note() == -1, "The original silent-enemy concept remains an archival drawing.")
 	var pause: CheckButton = gallery.get_node("%PauseMotion")
 	pause.button_pressed = true
 	var held: float = gallery.get("_time")
@@ -352,15 +352,20 @@ func _test_share_art() -> void:
 	await process_frame
 	await process_frame
 	_check(art.size == Vector2(viewport.size), "The share portraits are exercised at card size.")
-	var portraits: Array = art.get("_portraits")
+	var portraits: Array = art.get("_actors")
+	var arena: DmjArena3D = art.get("_arena")
 	_check(portraits.size() == 3, "The share card still shows its three posed drones.")
 	var plated := 0
-	for portrait: DmjDroneArt in portraits:
-		if portrait is DmjPlatedKnuckleArt:
+	for portrait: JamBot in portraits:
+		if portrait is PlatedKnuckle:
 			plated += 1
-		_check(portrait.reduced_motion, "Share portraits are still frames.")
-	_check(plated == 1, "The share card reuses the live armored drawing instead of a placeholder.")
-	_check(not _contains_combat(art), "Sharing never starts an encounter.")
+		_check(
+			not portrait.is_processing() and is_zero_approx(float(portrait.presentation_state()["time"])),
+			"Share portraits have no advancing combat or animation clock."
+		)
+		_check(arena.model_for(portrait) is DmjDrone3D, "Share portraits use the playable mesh chassis.")
+	_check(plated == 1, "The share card reuses the live armored model instead of a placeholder.")
+	_check(arena.director == null and arena.shots.active_count() == 0, "Sharing never starts an encounter or fires a shot.")
 	viewport.queue_free()
 	await process_frame
 

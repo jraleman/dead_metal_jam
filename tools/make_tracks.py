@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Renders the two generated tracks and the charts written over them.
+"""Authors the two generated note charts, with optional archival audio rendering.
 
 `assets/demo.ogg` is a recording the author holds the rights to. Tracks 02 and
 03 are not recordings: they are synthesised here, and this file is the only
@@ -16,12 +16,16 @@ Beat positions are written in *beats*, not seconds, for the same reason: the
 grid is the tempo, so a chart authored this way is on the bar by construction
 rather than by measurement. `DESIGN.md` §10 records what the alternative cost.
 
-Usage:
-    python tools/make_tracks.py            # writes assets/ and chart/charts/
-    python tools/make_tracks.py --verify   # re-measures what was written
+Gameplay has no backing music. Charts never reference the optional audio files.
 
-Needs numpy and ffmpeg on PATH. Nothing in the game runs it; it is an authoring
-tool, and its output is committed.
+Usage:
+    python tools/make_tracks.py            # writes chart/charts/ only
+    python tools/make_tracks.py --audio    # also renders archival audio
+    python tools/make_tracks.py --verify   # checks committed charts
+    python tools/make_tracks.py --audio --verify  # also checks archival audio
+
+Needs NumPy; ffmpeg is used only with --audio. Nothing in the game runs this
+authoring tool.
 """
 
 from __future__ import annotations
@@ -134,7 +138,7 @@ TRACK_02 = Song(
             [
                 Beat(24, A2),
                 Beat(28, C3),
-                Beat(32, D3),
+                Beat(32, D3, enemy="silencer_sentry"),
                 Beat(36, E3),
                 Beat(40, D3),
             ],
@@ -169,7 +173,7 @@ TRACK_02 = Song(
                 Beat(94, D3),
                 Beat(97, E3),
                 Beat(100, G3),
-                Beat(103, A3),
+                Beat(103, A3, notes=[A3, G3, E3, A2], enemy="conductor"),
             ],
         ),
     ],
@@ -213,7 +217,7 @@ TRACK_03 = Song(
             [
                 Beat(24, E2),
                 Beat(28, G2b),
-                Beat(32, A2b),
+                Beat(32, A2b, enemy="silencer_sentry"),
                 Beat(36, B2),
                 Beat(40, A2b),
                 Beat(44, G2b),
@@ -246,7 +250,7 @@ TRACK_03 = Song(
             [
                 Beat(96, B2),
                 Beat(100, D3b),
-                Beat(104, E3b),
+                Beat(104, E3b, enemy="silencer_sentry"),
                 Beat(108, D3b),
                 Beat(112, B2),
                 Beat(116, A2b),
@@ -263,7 +267,7 @@ TRACK_03 = Song(
                 Beat(132, D3b),
                 Beat(135, E3b),
                 Beat(138, B2),
-                Beat(141, E2),
+                Beat(141, E2, notes=[E2, G2b, B2, E2], enemy="conductor"),
             ],
         ),
     ],
@@ -551,12 +555,11 @@ def _tres_float(value: float) -> str:
     return f"{rounded:g}"
 
 
-def write_chart(song: Song) -> Path:
+def chart_text(song: Song) -> str:
     seconds_per_beat = 60.0 / song.bpm
     lines: list[str] = [
         '[gd_resource type="Resource" script_class="JamChart" format=3]',
         "",
-        f'[ext_resource type="AudioStream" path="{RES_PREFIX}/assets/{song.stem}.ogg" id="1_audio"]',
         f'[ext_resource type="Script" path="{RES_PREFIX}/chart/jam_chart.gd" id="2_chart"]',
         f'[ext_resource type="Script" path="{RES_PREFIX}/chart/jam_section.gd" id="3_section"]',
         f'[ext_resource type="Script" path="{RES_PREFIX}/chart/jam_beat.gd" id="4_beat"]',
@@ -606,16 +609,18 @@ def write_chart(song: Song) -> Path:
     lines.append(f'title = "{song.title}"')
     lines.append(f'artist = "{song.artist}"')
     lines.append(f"bpm = {_tres_float(song.bpm)}")
-    lines.append('audio = ExtResource("1_audio")')
     lines.append(
         'sections = Array[ExtResource("3_section")](['
         + ", ".join(f'SubResource("{section_id}")' for section_id in section_ids)
         + "])"
     )
     lines.append("")
+    return "\n".join(lines)
 
+
+def write_chart(song: Song) -> Path:
     path = CHARTS / f"{song.stem}.tres"
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text(chart_text(song), encoding="utf-8")
     return path
 
 
@@ -813,26 +818,38 @@ def main() -> int:
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="Re-measure what is already committed instead of rebuilding it.",
+        help="Check committed charts; combine with --audio to measure archival recordings too.",
+    )
+    parser.add_argument(
+        "--audio", action="store_true",
+        help="Also rebuild archival audio. The game does not play these recordings.",
     )
     arguments = parser.parse_args()
 
     if arguments.verify:
         problems: list[str] = []
         for song in SONGS:
-            problems.extend(verify(song))
+            chart = CHARTS / f"{song.stem}.tres"
+            if not chart.is_file():
+                problems.append(f"{song.stem}: chart is missing.")
+            elif chart.read_text(encoding="utf-8") != chart_text(song):
+                problems.append(f"{song.stem}: chart does not match its authored note grid.")
+            if arguments.audio:
+                problems.extend(verify(song))
         if problems:
             for problem in problems:
                 print(f"FAIL: {problem}", file=sys.stderr)
             return 1
-        print("Both generated tracks check out.")
+        print("Both generated charts check out." if not arguments.audio else "Charts and archival audio check out.")
         return 0
 
-    ASSETS.mkdir(parents=True, exist_ok=True)
     CHARTS.mkdir(parents=True, exist_ok=True)
     for song in SONGS:
-        build(song)
-    print("\nRun 'godot --headless --path . --import' so Godot picks the audio up.")
+        if arguments.audio:
+            ASSETS.mkdir(parents=True, exist_ok=True)
+            build(song)
+        else:
+            print(f"Wrote {write_chart(song).relative_to(GAME_DIR)} (no backing audio).")
     return 0
 
 

@@ -55,7 +55,7 @@ func _initialize() -> void:
 		var path: String = SHIPPED[track]
 		_test_shipped_chart_loads(path)
 		_test_shipped_chart_is_playable(path)
-		_test_shipped_chart_plays_the_whole_song(path)
+		_test_shipped_chart_has_no_backing_music(path)
 
 	_test_track_builder_shape()
 	_test_track_builder_avoids_repeats()
@@ -416,7 +416,7 @@ func _test_shipped_chart_loads(path: String) -> void:
 		return
 
 	var song := chart.title if not chart.title.is_empty() else path.get_file()
-	_check(chart.audio != null, "%s carries the track's audio." % song)
+	_check(chart.audio == null, "%s leaves the instrument audible without a backing track." % song)
 	_check(chart.bpm > 0.0, "%s has a tempo." % song)
 	_check(not chart.title.is_empty(), "%s is titled for the banner." % path.get_file())
 	_check(
@@ -493,50 +493,20 @@ func _test_shipped_chart_is_playable(path: String) -> void:
 	)
 
 
-## The song plays through once and outlasts the chart written over it.
-##
-## Neither half is visible in the chart file, and the first build got both
-## wrong: it shipped a sixty-second trim with `loop` set, which kept every
-## test green — the encounter is driven by the chart's clock, not the
-## stream's — while the player heard one minute of music repeat under a round
-## twice that long. A jam that loops back on itself mid-phrase is the one
-## thing this game cannot sound like.
-##
-## Looping is a property of the *import*, not of anything in code, so this is
-## the only place it can be caught.
-func _test_shipped_chart_plays_the_whole_song(path: String) -> void:
+func _test_shipped_chart_has_no_backing_music(path: String) -> void:
 	var chart := load(path) as JamChart
 	if chart == null:
 		return
-	var song := chart.title if not chart.title.is_empty() else path.get_file()
-	var audio := chart.audio
-	if audio == null:
-		_check(false, "%s carries audio to check." % song)
-		return
-
-	_check(
-		"loop" in audio,
-		"%s's stream exposes a loop flag to be checked at all." % song
-	)
-	_check(
-		not bool(audio.get("loop")),
-		"%s does not loop; it is played once and the round ends with it." % song
-	)
-
-	var length := audio.get_length()
-	var charted := chart.duration()
-	_check(
-		length >= charted,
-		"%s outlasts its own chart: %.1f s of audio for %.1f s of bots."
-		% [song, length, charted]
-	)
-	# A margin, not just "longer": a stream that ends the instant the last bot
-	# does would fade the round out on silence.
-	_check(
-		length >= charted + 30.0,
-		"%s has room left over at the end, got %.1f s spare."
-		% [song, length - charted]
-	)
+	_check(chart.audio == null, "%s must not load backing music." % chart.title)
+	_check(chart.duration() > 0.0, "Note timing and round duration do not depend on an audio stream.")
+	var roster: Array[String] = []
+	for wave: Dictionary in chart.to_track():
+		for plan: Dictionary in wave["drones"]:
+			var enemy := str(plan["enemy"])
+			if not roster.has(enemy):
+				roster.append(enemy)
+	_check(roster.has("silencer_sentry"), "Every authored track introduces the echo shield.")
+	_check(roster.has("conductor"), "Every authored track finishes with a phrase boss.")
 
 
 # --------------------------------------------------------------------------
@@ -635,8 +605,11 @@ func _test_track_builder_stages_a_plated_knuckle() -> void:
 	var plated := 0
 	for index in range(track.size()):
 		var drones: Array = track[index]["drones"]
-		var last: Dictionary = drones[drones.size() - 1]
-		var is_plated := str(last.get("enemy", "")) == "plated_knuckle"
+		var last: Dictionary = {}
+		for plan: Dictionary in drones:
+			if str(plan.get("enemy", "")) == "plated_knuckle":
+				last = plan
+		var is_plated := not last.is_empty()
 		_check(
 			is_plated == (index >= DmjTrackBuilder.PHRASE_FROM_WAVE),
 			"Wave %d stages a phrase only once the core verb is taught." % index
@@ -659,7 +632,7 @@ func _test_track_builder_stages_a_plated_knuckle() -> void:
 	var tight_rng := RandomNumberGenerator.new()
 	tight_rng.seed = 11
 	var two_note_track := DmjTrackBuilder.build([40, 45], 4, tight_rng)
-	var compact: Dictionary = two_note_track[3]["drones"][-1]
+	var compact: Dictionary = two_note_track[2]["drones"][-1]
 	_check(
 		(compact["notes"] as Array).size() == 3
 		and int(compact["notes"][0]) == int(compact["notes"][2]),

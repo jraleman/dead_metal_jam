@@ -21,7 +21,7 @@ extends GameShell
 const GAME_ID := "dead_metal_jam"
 
 ## The chart the player asked for supplies the sections, the roster placement
-## and the audio; a track it fails to compile falls back to the practice ramp,
+## and note patterns; a track it fails to compile falls back to the practice ramp,
 ## so a broken chart costs the song and not the round. Which charts exist is
 ## [constant DmjOptions.CHART_PATHS] — the same list the Settings row is built
 ## from, so the menu and the loader can never disagree about how many songs
@@ -109,11 +109,10 @@ var _router: NoteRouter
 var _mic: MicNoteSource
 var _keys: KeyboardNoteSource
 var _director: EncounterDirector
-var _shot_fx: DmjShotFx
+var _arena: DmjArena3D
+var _shot_fx: DmjShotFx3D
 var _ending_left := -1.0
-## The round's song. This game plays it itself rather than through
-## `AudioManager`, so it stops when the world does — see [DmjTrackBed].
-var _bed: DmjTrackBed
+var _introduced: Array[String] = []
 ## Charts already read off disk, by path. See [method _chart_at].
 var _charts: Dictionary = {}
 var _track: Array = []
@@ -199,8 +198,8 @@ func _build_playfield() -> void:
 	# panel is folded into it — see [method _play_instruction].
 	_bottom_row.hide()
 
-	_bed = DmjTrackBed.new()
-	add_child(_bed)
+	# Stop both music crossfade voices before the microphone learns the room.
+	AudioManager.stop_music(0.0)
 
 	_router = NoteRouter.new()
 	_router.name = "NoteRouter"
@@ -240,16 +239,20 @@ func _build_playfield() -> void:
 
 	_director = EncounterDirector.new()
 	_director.name = "EncounterDirector"
+	_director.drone_spawned.connect(_on_drone_spawned)
 	_director.drone_fired.connect(_on_drone_fired)
 	_director.section_started.connect(_on_section_started)
 	_director.wave_started.connect(_on_wave_started)
 	_director.wave_cleared.connect(_on_wave_cleared)
 	_director.track_cleared.connect(_on_track_cleared)
 	_playfield.add_child(_director)
-	_shot_fx = DmjShotFx.new()
-	_shot_fx.name = "Shots"
-	_shot_fx.set_presentation_options(_reduced_motion_enabled, _intense_effects_enabled)
-	_director.add_child(_shot_fx)
+	_director.hide()
+	_arena = DmjArena3D.new()
+	_arena.name = "Battlefield3D"
+	_playfield.add_child(_arena)
+	_arena.director = _director
+	_arena.set_presentation_options(_reduced_motion_enabled, _intense_effects_enabled)
+	_shot_fx = _arena.shots
 
 	# Deferred so the HUD containers have sorted: the play area is measured
 	# against them, and their geometry is still the scene file's until then.
@@ -279,8 +282,9 @@ func _refresh_encounter_layout() -> void:
 		return
 	var bounds := _playfield_bounds()
 	_director.refresh_layout(bounds)
-	if _shot_fx != null:
-		_shot_fx.set_field(bounds)
+	if _arena != null:
+		_arena.set_field(bounds)
+		_arena.sync_from_director()
 
 
 ## True while the microphone is still learning the room, which is the one part
@@ -392,9 +396,7 @@ func _load_chart() -> JamChart:
 	)
 
 
-## Charts are kept between rounds because one carries the round's audio as well
-## as its sections, and re-reading a megabyte of song off disk to start the same
-## track again would be a stutter on Play Again.
+## Cache the authored note patterns between rounds.
 ##
 ## **Keyed by path**, because the track is a setting the player can change
 ## between rounds: caching one chart in a bare `_chart` was correct when one
@@ -418,6 +420,7 @@ func _chart_at(path: String) -> JamChart:
 
 func _reset_round_state() -> void:
 	_ending_left = -1.0
+	_introduced.clear()
 	_shot_fx.clear()
 	_shot_fx.show()
 	_hits = 0
@@ -448,44 +451,8 @@ func _activate_round() -> void:
 	super()
 	_set_readout_visible(true)
 	_status_label.text = _play_instruction()
-	_start_track_music()
+	AudioManager.stop_music(0.0)
 	_director.begin()
-
-
-## Starts the song from the top, every round.
-##
-## Not the shell's `music` export: that plays once, on scene ready, and a
-## rhythm game whose second round opens in silence is a bug the player reads
-## as the game having broken.
-##
-## The song is played on the game's own [DmjTrackBed] rather than through
-## `AudioManager`, because a round's song is part of the round: it has to stop
-## when the world stops and leave when the scene leaves, and the manager's
-## players run with `PROCESS_MODE_ALWAYS` precisely so that they do neither.
-## The bed handles both itself; the only part wired up on this side is the way
-## *back* into a round, in [method _on_pause_closed]. Whatever the *menu* left
-## playing is still the manager's, so it is faded out here.
-##
-## It runs through the soundcheck on purpose — the noise floor has to be
-## measured against the room the player will actually be playing in, and that
-## room has this song in it (§4.3).
-func _start_track_music() -> void:
-	AudioManager.stop_music(DmjTrackBed.MENU_HANDOVER_FADE)
-	_bed.start(_round_music())
-
-
-## The bed for this round.
-##
-## A song brings its own. The practice ramp does not have one — it is generated
-## from a note pool and a wave count, and it has no tempo to agree with — so it
-## borrows the first track's, which is what it has played under since milestone
-## 6. An arbitrary bed is a better answer than silence for the mode a player
-## uses to warm up in.
-func _round_music() -> AudioStream:
-	var chart := _load_chart()
-	if chart == null:
-		chart = _chart_at(DmjOptions.chart_path(DmjOptions.TRACK_SONG))
-	return chart.audio if chart != null else null
 
 
 func _finish_round() -> void:
@@ -494,8 +461,7 @@ func _finish_round() -> void:
 		_shot_fx.clear()
 		_shot_fx.hide()
 	_set_readout_visible(false)
-	if _bed != null:
-		_bed.finish(DmjTrackBed.ROUND_END_FADE)
+	AudioManager.stop_music(0.0)
 	# Demo may have left it paused mid-beat, and a paused timer would survive
 	# into the next round.
 	_round_timer.paused = false
@@ -516,18 +482,6 @@ func _end_round() -> void:
 		_router.set_accepting(false)
 		return
 	super()
-
-
-## Resuming is the only way out of the pause overlay that leaves a round to go
-## back to, and the one thing about the song the bed cannot do for itself.
-## `closed` is emitted by the pause menu's own `resume()` and by nothing else,
-## so exiting cannot reach this. Unpausing would be the wrong signal: the
-## overlay's *Exit to main menu* unpauses the tree *before* handing the scene
-## to `Router`, so the song would blip back on over a scene on its way out.
-func _on_pause_closed() -> void:
-	super()
-	if _round_active and _bed != null:
-		_bed.resume()
 
 
 ## The readout and the combo chip only mean anything while a round is running,
@@ -558,9 +512,10 @@ func _update_round(delta: float, _time_left: float) -> void:
 	if _router == null:
 		return
 	var field := _playfield_bounds()
-	_shot_fx.set_field(field)
+	_arena.set_field(field)
 	if _ending_left >= 0.0:
 		_director.refresh_layout(field)
+		_arena.sync_from_director()
 		_ending_left = maxf(_ending_left - delta, 0.0)
 		if is_zero_approx(_ending_left):
 			super._end_round()
@@ -591,6 +546,7 @@ func _update_round(delta: float, _time_left: float) -> void:
 		# is derived from this clock, so slowing it here slows all of them
 		# together and none of them can drift out of agreement.
 		_director.advance(delta * _round_gameplay_speed, _playfield_bounds())
+	_arena.sync_from_director()
 
 	# Demo holds the world at each beat, so the backstop has to hold with it.
 	# Otherwise "the run always finishes" (§3) would be false for exactly the
@@ -643,8 +599,8 @@ func _set_reduced_motion_enabled(value: bool) -> void:
 		_reset_intense_effects()
 	if _life_rack != null:
 		_life_rack.set_presentation_options(value, _intense_effects_enabled)
-	if _shot_fx != null:
-		_shot_fx.set_presentation_options(value, _intense_effects_enabled)
+	if _arena != null:
+		_arena.set_presentation_options(value, _intense_effects_enabled)
 	if _director != null:
 		_director.set_reduced_motion(value)
 
@@ -653,8 +609,8 @@ func _set_intense_effects_enabled(value: bool) -> void:
 	super(value)
 	if _life_rack != null:
 		_life_rack.set_presentation_options(_reduced_motion_enabled, value)
-	if _shot_fx != null:
-		_shot_fx.set_presentation_options(_reduced_motion_enabled, value)
+	if _arena != null:
+		_arena.set_presentation_options(_reduced_motion_enabled, value)
 	if _director != null:
 		_director.set_effects_enabled(value)
 	if not value and _director != null:
@@ -725,11 +681,11 @@ func _on_note_started(event: NoteEvent) -> void:
 	var judgement := _director.resolve_note(
 		event.pitch_class, _streaks[PLAYER_ONE], event.cents_off, exact
 	)
-	_shot_fx.set_field(_playfield_bounds())
 	if int(judgement["kind"]) == EncounterDirector.Judgement.HIT:
+		var target: JamBot = judgement["drone"]
 		_shot_fx.player_shot(
-			judgement["shot_position"], bool(judgement["killed"]),
-			event.midi_note, float(judgement["shot_scale"]), judgement["shot_ground"]
+			_arena.aim_point(target), bool(judgement["killed"]),
+			event.midi_note, _arena.ground_point(target), target.hit_label()
 		)
 	else:
 		_shot_fx.miss()
@@ -748,7 +704,7 @@ func _on_note_started(event: NoteEvent) -> void:
 	# How *much* it lights is where the difference shows.
 	var landed := int(judgement.get("kind", EncounterDirector.Judgement.NOISE))
 	if _intense_effects_enabled and not _reduced_motion_enabled:
-		_director.flash_rail(
+		_shot_fx.flash(
 			(0.75 if landed == EncounterDirector.Judgement.HIT else 0.3)
 			+ event.velocity * 0.25
 		)
@@ -756,6 +712,8 @@ func _on_note_started(event: NoteEvent) -> void:
 	_update_scores()
 	_update_streaks()
 	_update_combo_label()
+	_arena.sync_from_director()
+	_update_target_readout()
 
 
 func _score_hit(event: NoteEvent, judgement: Dictionary) -> void:
@@ -874,10 +832,22 @@ func _on_drone_fired(drone: JamBot) -> void:
 	_update_combo_label()
 	if _director.reports_damage:
 		if drone != null:
-			_shot_fx.set_field(_playfield_bounds())
-			_shot_fx.enemy_shot(drone.muzzle_point())
+			_shot_fx.enemy_shot(_arena.muzzle_point(drone))
 		_prompt_root.show_feedback("HIT TAKEN", "BEAT THE ATTACK BAR", DmjPalette.DANGER)
 		_lose_life(PLAYER_ONE)
+
+
+func _on_drone_spawned(drone: JamBot) -> void:
+	var key := drone.roster_key()
+	if _introduced.has(key):
+		return
+	_introduced.append(key)
+	if key == EncounterDirector.ENEMY_RUSTY_CLANKY:
+		return
+	_prompt_root.show_feedback("NEW ENEMY", drone.display_name(), DmjPalette.AMBER)
+	AudioManager.request_caption(
+		"%s. %s" % [drone.display_name().capitalize(), drone.instruction()]
+	)
 
 
 ## Every change to the score goes through here, so the floor at
@@ -989,6 +959,8 @@ func _update_target_readout() -> void:
 				if not _advance_line_now.is_empty()
 				else "Breathe. The next wave is coming."
 			)
+		else:
+			_status_label.text = _play_instruction()
 		return
 
 	var front: JamBot = live[0]
@@ -1013,6 +985,7 @@ func _update_target_readout() -> void:
 	# would be the game telling the player to do something it is not going to
 	# check. The readout has to say what is actually being judged.
 	if not _director.pitch_matters:
+		_status_label.text = "Play any note as the ring closes. Each hit breaks one part."
 		_prompt_caption.text = (
 			"PLAY ANY NOTE" if demand <= 1
 			else "PLAY ANY %d NOTES" % demand
@@ -1020,6 +993,7 @@ func _update_target_readout() -> void:
 		_target_label.text = "ANY"
 		return
 
+	_status_label.text = "%s: %s" % [front.display_name().capitalize(), front.instruction()]
 	if _director.is_time_stopped():
 		_prompt_caption.text = "WAITING FOR YOU"
 	else:

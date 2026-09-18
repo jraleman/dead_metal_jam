@@ -19,20 +19,6 @@ const MANIFEST := preload("res://games/dead_metal_jam/game.gd")
 
 @export_file("*.tscn") var next_scene := "res://scenes/menus/main_menu.tscn"
 
-## The opening's backing track, under the whole slideshow.
-##
-## An `@export` because that is where the framework's own `scenes/boot/intro.gd`
-## and `main_menu.gd` keep theirs, so anyone looking for a scene's music finds
-## it in the same place — but it carries its own default, so the scene file does
-## not have to remember. The stream is imported with `loop = false`: the opening
-## is nine seconds and the bed is twenty, so it is a bed that gets faded, never
-## a loop that comes round. The bed is a trimmed cut of a four-minute take —
-## twenty seconds is all this scene can ever reach, and the master is not worth
-## shipping eleven times over for the eleven seconds nobody hears.
-@export var music: AudioStream = preload(
-	"res://games/dead_metal_jam/assets/intro-bg.ogg"
-)
-
 ## Narration, shown in order. Each line replaces the one before it.
 @export var cards: Array[String] = [
 	"The amp is still warm.",
@@ -66,8 +52,8 @@ const SHAKE_DECAY := 42.0
 @onready var _hint: Label = %Hint
 @onready var _progress: ColorRect = %ProgressFill
 
-var _actors: Array[RustyClanky] = []
-var _shots: DmjShotFx
+var _actors: Array[JamBot] = []
+var _shots: DmjShotFx3D
 var _cues: Array[Dictionary] = []
 var _chord: AudioStreamWAV
 var _hum: AudioStreamWAV
@@ -86,10 +72,11 @@ var _next_cue := 0
 var _finished := false
 var _reduced_motion := false
 var _intense_effects := true
-var _rail: DmjRail
+var _arena: DmjArena3D
 
 
 func _ready() -> void:
+	AudioManager.stop_music(0.0)
 	_reduced_motion = Settings.reduced_motion_enabled()
 	_intense_effects = Settings.visual_effects_enabled()
 	_rng.randomize()
@@ -107,6 +94,7 @@ func _ready() -> void:
 	_flash.color.a = 0.0
 	_progress.anchor_right = 0.0
 	_drones.scale = Vector2(DRONE_ZOOM, DRONE_ZOOM)
+	_drones.hide()
 
 	# Rendering the sounds up front keeps the synthesis out of the cue that
 	# needs them, where a few milliseconds would land as a stutter.
@@ -115,18 +103,12 @@ func _ready() -> void:
 	for note in DRONE_NOTES:
 		_pings.append(DmjIntroSound.note_ping(note + 12))
 
-	_rail = DmjRail.new()
-	_rail.name = "Rail"
-	_rail.z_index = 0
-	_rail.show_behind_parent = true
-	_rail.scale = Vector2.ONE * DRONE_ZOOM
-	_rail.set_reduced_motion(_reduced_motion)
-	_rail.set_effects_enabled(_intense_effects)
-	_stage.add_child(_rail)
-	_shots = DmjShotFx.new()
-	_shots.set_presentation_options(_reduced_motion, _intense_effects)
-	_shots.scale = Vector2.ONE * DRONE_ZOOM
-	_stage.add_child(_shots)
+	_arena = DmjArena3D.new()
+	_arena.name = "Opening3D"
+	_stage.add_child(_arena)
+	_arena.set_presentation_options(_reduced_motion, _intense_effects)
+	_arena.set_weapon_visible(false)
+	_shots = _arena.shots
 	get_viewport().size_changed.connect(_refresh_layout)
 	_title.resized.connect(_center_pivot)
 	_refresh_layout()
@@ -135,31 +117,16 @@ func _ready() -> void:
 	_build_cues()
 	_pulse_hint()
 	_start_progress()
-	_start_music()
-
-
-## The bed starts with the scene rather than on the title cue, so the amp hum
-## at 0.15 s already has something to sit in. It fades in over the hum instead
-## of arriving with it, which is why the power chord at 1.2 s still reads as the
-## loudest thing in the opening.
-func _start_music() -> void:
-	if music == null:
-		return
-	AudioManager.play_music(music, 1.1)
 
 
 func _process(delta: float) -> void:
-	_shots.set_field(_drone_field())
 	_elapsed += delta
 	_run_due_cues()
 	_advance_drones(delta)
 	_advance_shake(delta)
-	_shots.position = _drones.position
-	_rail.update_rail(
-		delta, _drone_field(), DRONE_NOTES.size(), false,
-		_drones.position / DRONE_ZOOM
-	)
-	_stage.queue_redraw()
+	var field := _drone_field()
+	_arena.set_field(Rect2(field.position * DRONE_ZOOM + _drones.position, field.size * DRONE_ZOOM))
+	_arena.present(_actors, 0, 1.0, _elapsed)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -208,9 +175,6 @@ func _cue_title() -> void:
 	AudioManager.request_caption("Power chord")
 	_add_shake(9.0)
 	_flash_screen(0.22)
-	if _intense_effects and not _reduced_motion:
-		_rail.flash(1.0)
-
 	if _title_tween and _title_tween.is_valid():
 		_title_tween.kill()
 	_title_tween = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -246,12 +210,10 @@ func _cue_answer(index: int) -> void:
 		"%s lands — drone down" % PitchDetector.note_name(DRONE_NOTES[index])
 	)
 	_shots.player_shot(
-		drone.aim_point(), true, DRONE_NOTES[index], drone.scale.x, drone.position
+		_arena.aim_point(drone), true, DRONE_NOTES[index], _arena.ground_point(drone)
 	)
 	_add_shake(5.0)
 	_flash_screen(0.1)
-	if _intense_effects and not _reduced_motion:
-		_rail.flash(0.75)
 	_target_next(index + 1)
 
 
@@ -404,9 +366,5 @@ func _finish() -> void:
 	for tween in [_card_tween, _title_tween, _flash_tween, _progress_tween, _hint_tween]:
 		if tween and tween.is_valid():
 			tween.kill()
-	# The menu's own music is optional (`main_menu.gd` only plays one if the
-	# scene sets it), so the opening has to clear its own bed or it would run
-	# on underneath the menu. A menu that *does* have music crossfades over
-	# this fade rather than waiting for it.
-	AudioManager.stop_music(0.5)
+	AudioManager.stop_music(0.0)
 	Router.goto(next_scene)

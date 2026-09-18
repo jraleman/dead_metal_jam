@@ -42,8 +42,7 @@ const DEFAULT_ARCHETYPE := "march"
 @export var artist := ""
 @export var bpm := 120.0
 
-## The track itself. Played under the round as a bed; the chart's own beat
-## times are what the game is judged against, not the audio clock.
+## Legacy import metadata only. Rounds deliberately never play backing audio.
 @export var audio: AudioStream
 
 @export var sections: Array[JamSection] = []
@@ -73,12 +72,8 @@ static func has_archetype(key: String) -> bool:
 ## approach. Every interval inside the section survives exactly, which is what
 ## a chart actually promises.
 ##
-## **Sections are not glued to the audio clock.** A wave ends when it is
-## cleared, and the rail advance in front of the next one is a fixed length, so
-## real time drifts from track time as the player plays well. The audio is a
-## bed, not a conductor; syncing to it needs the chart cursor to drive the
-## spawner from the audio position, and that is a bigger change than pacing
-## needs (§13).
+## Sections follow the encounter clock, not audio playback. Demo can wait
+## indefinitely without desynchronizing the notes from the visual beat cues.
 func to_track(lane_count := EncounterDirector.LANE_COUNT) -> Array:
 	var waves: Array = []
 	var lanes := maxi(lane_count, 1)
@@ -158,6 +153,14 @@ func _compile_beat(
 		# round length is derived from the plan, so a wind-up that only exists
 		# at runtime would make the round timer lie (§2).
 		plan["windup"] = maxf(windup, PlatedKnuckle.windup_for(phrase.size()))
+	elif beat.enemy == "silencer_sentry":
+		plan["notes"] = [beat.note, beat.note]
+		plan["windup"] = maxf(windup, SilencerSentry.windup_for())
+	elif beat.enemy == "conductor":
+		var phrase := DmjConductor.normalize_sequence(beat.phrase(), beat.note)
+		plan["notes"] = phrase
+		plan["note"] = phrase[0]
+		plan["windup"] = maxf(windup, DmjConductor.windup_for())
 
 	return plan
 

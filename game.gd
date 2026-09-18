@@ -56,6 +56,9 @@ static func manifest() -> GameManifest:
 			+ "the rest. Any octave counts, so play it where it sits best. No "
 			+ "instrument handy? A MIDI keyboard or the computer keyboard works. "
 			+ "Plated Knuckles take three notes in order; a wrong note resets their armor."
+			+ " Silencer Sentries need the same note twice. The Conductor needs "
+			+ "four notes, saving progress after each pair. No background music: "
+			+ "listen to your instrument and follow the visual beat rings."
 		),
 		# Overrides the framework's mouse-and-keyboard line, which would be
 		# nonsense here: nothing in this game is played with a control the base
@@ -76,9 +79,9 @@ static func manifest() -> GameManifest:
 	# is seeded from the clock, so its captions would describe a take nobody
 	# else will ever get. Re-record with
 	# `tools/record_tutorials.ps1 -Games dead_metal_jam`.
-	game.tutorial_video_path = "res://assets/video/tutorial_dead_metal_jam.ogv"
+	game.tutorial_video_path = "res://games/dead_metal_jam/assets/video/tutorial.ogv"
 	game.tutorial_poster_path = (
-		"res://assets/video/tutorial_dead_metal_jam_poster.webp"
+		"res://games/dead_metal_jam/assets/video/tutorial_poster.webp"
 	)
 	game.theme = _theme()
 	game.credits = [
