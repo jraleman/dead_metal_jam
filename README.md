@@ -71,6 +71,12 @@ motion or disabled effects removes camera travel, recoil, flashes and
 particles while preserving readable notes, attack bars and static shot
 outcomes. Turning effects back on does not replay old explosions.
 
+The translucent console keeps the called note, threat and input/error status
+visible. **Help** reveals the input meter, heard note, pitch key and optional
+track/combo details. The console reflows at enlarged UI sizes; short windows
+keep diagnostics compact instead of repeating their headings. Pitch letters
+scale with the readout, and caption space is reserved before a sound cue appears.
+
 ### Notes and armor
 
 Every octave uses the same pitch-color mapping, shown in the HUD's color key:

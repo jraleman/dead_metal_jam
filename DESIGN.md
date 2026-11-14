@@ -66,10 +66,11 @@ colors are retained. Reduced motion also stops menu decoration when changed live
 
 Three combat rooms have distinct machinery, cover props and firing bays,
 without scrolling floor guides or a strike line. The opening and share card
-reuse that scenery rather than drawing separate approximations. A responsive instrument
-console shows the called note, real input level, the last heard note and scored
-judgements; the upper HUD shows the track, completed waves and charge toward
-the next combo multiplier. Its measured bounds keep the playfield clear even
+reuse that scenery rather than drawing separate approximations. A translucent instrument
+console keeps the called note, threat, status and scored judgements visible.
+Help reveals the real input level, last heard note, pitch key and optional
+track/combo details; short screens omit repeated headings. Its measured bounds
+and physically scaled pitch letters keep the playfield and readouts usable even
 when the console stacks, with stable space reserved for audio captions so they
 never move the battlefield as they fade. Reduced motion suppresses
 entry slides, camera motion and traveling orbs while retaining shot paths,

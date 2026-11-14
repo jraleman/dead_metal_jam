@@ -150,10 +150,10 @@ segments = 5
 [node name="DmjComboGroup" type="VBoxContainer" parent="HUD/Overlay/Margins/Layout/Callout"]
 unique_name_in_owner = true
 layout_mode = 1
-anchor_left = 0.78
+anchor_left = 0.5
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
+grow_horizontal = 0
 grow_vertical = 2
 mouse_filter = 2
 theme_override_constants/separation = 3
@@ -222,7 +222,12 @@ text = "PLAY THIS NOTE"
 theme_override_colors/font_color = Color(0.647059, 0.72549, 0.737255, 1)
 theme_override_font_sizes/font_size = 16
 
-[node name="DmjTarget" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
+[node name="NoteRow" type="BoxContainer" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
+layout_mode = 2
+mouse_filter = 2
+vertical = true
+
+[node name="DmjTarget" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target/NoteRow"]
 unique_name_in_owner = true
 layout_mode = 2
 mouse_filter = 2
@@ -230,9 +235,11 @@ text = "…"
 theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
 theme_override_font_sizes/font_size = 76
 
-[node name="DmjThreat" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target"]
+[node name="DmjThreat" type="Label" parent="HUD/Overlay/Margins/Layout/DmjPrompt/Layout/DmjConsoleRow/Target/NoteRow"]
 unique_name_in_owner = true
 layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
 mouse_filter = 2
 theme_override_colors/font_color = Color(1, 0.784314, 0.415686, 1)
 theme_override_font_sizes/font_size = 16

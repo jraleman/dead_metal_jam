@@ -18,6 +18,7 @@ func _init() -> void:
 
 
 func _run() -> void:
+	get_root().size = Vector2i(1280, 720)
 	_settings = get_root().get_node("Settings")
 	_values = _settings.get("_values")
 	var saved := _values.duplicate(true)
@@ -223,8 +224,8 @@ func _test_lives_round() -> void:
 		"Lives replace the visible countdown instead of adding a duplicate gauge."
 	)
 	_check(
-		rack.get_node("%LifeCount").text == "3 / 3 LIVES"
-		and not rack.accessibility_description.is_empty(),
+		rack.get_node("%LifeCount").text == "3"
+		and rack.accessibility_description.contains("3 of 3 lives"),
 		"The rack provides a numeric count and an accessible explanation."
 	)
 	_check(
@@ -334,16 +335,17 @@ func _test_layouts() -> void:
 			var status: Control = rack.get_node("%LifeStatus")
 			_check(
 				local.grow(0.5).encloses(heading.get_rect())
-				and local.grow(0.5).encloses(status.get_rect()),
-				"Both lives readouts fit the rack at %s." % dimensions
+				and not status.visible
+				and (rack.get_node("%LifeCount") as Label).text == str(count),
+				"The compact count fits and full lives context stays in its tooltip at %s." % dimensions
 			)
 			for index in range(count):
 				var tube := rack.tube_rect(index)
 				_check(
 					local.encloses(tube) and tube.size.y > 0.0
 					and not tube.intersects(heading.get_rect())
-					and not tube.intersects(status.get_rect()),
-					"Tube %d fits without covering either label." % index
+					and (not status.visible or not tube.intersects(status.get_rect())),
+					"Tube %d fits without covering a visible label." % index
 				)
 			var console: Control = _game.get_node("%DmjPrompt")
 			var field: Rect2 = _game.call("_playfield_bounds")

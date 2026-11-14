@@ -421,30 +421,33 @@ func _test_console_scene() -> void:
 	GameCatalog.select("dead_metal_jam")
 	get_root().get_node("GameSession").call("configure_single_player")
 
-	var viewport := SubViewport.new()
-	viewport.size = Vector2i(1920, 1080)
-	get_root().add_child(viewport)
+	var original_size := get_root().size
+	var original_minimum := get_root().min_size
+	get_root().min_size = Vector2i.ZERO
+	get_root().size = Vector2i(1920, 1080)
 	var game := packed.instantiate()
-	viewport.add_child(game)
+	get_root().add_child(game)
 	await process_frame
 	await process_frame
 	await process_frame
-	await _check_room_is_fitted_while_the_round_waits(game, viewport)
+	await _check_room_is_fitted_while_the_round_waits(game)
 	game.set_process(false)
 	(game.get_node("%RoundTimer") as Timer).stop()
 	var console: DmjPerformanceHud = game.get_node("%DmjPrompt")
 	console.set_process(false)
 	_check_console_feedback(game, console)
-	await _check_console_layouts(game, console, viewport)
+	await _check_console_layouts(game, console)
 
 	game.set("_round_active", false)
 	game.call("_finish_round")
 	get_root().get_node("AudioManager").call("stop_music", 0.0)
-	viewport.queue_free()
+	game.queue_free()
 	await process_frame
 	await process_frame
 	values.clear()
 	values.merge(saved, true)
+	get_root().min_size = original_minimum
+	get_root().size = original_size
 	_finish.call_deferred()
 
 
@@ -488,15 +491,13 @@ func _test_atmosphere_and_parallax() -> void:
 ## the advance, so for all of that the room stayed at the placeholder size
 ## [EncounterDirector] is built with — a small corridor in the corner of the
 ## screen that snapped to full size the moment the soundcheck ended.
-func _check_room_is_fitted_while_the_round_waits(
-	game: Node, viewport: SubViewport
-) -> void:
+func _check_room_is_fitted_while_the_round_waits(game: Node) -> void:
 	var director: EncounterDirector = game.get("_director")
 	var arena: DmjArena3D = game.get("_arena")
 	var was_active := bool(game.get("_round_active"))
 	game.set("_round_active", false)
 	for dimensions: Vector2i in [Vector2i(1920, 1080), Vector2i(1280, 720)]:
-		viewport.size = dimensions
+		get_root().size = dimensions
 		for _frame in range(3):
 			await process_frame
 		var play_area: Rect2 = game.call("_playfield_bounds")
@@ -593,40 +594,58 @@ func _check_console_feedback(game: Node, console: DmjPerformanceHud) -> void:
 
 
 func _check_console_layouts(
-	game: Node, console: DmjPerformanceHud, viewport: SubViewport
+	game: Node, console: DmjPerformanceHud, expanded := false
 ) -> void:
 	var captions: Control = game.get_node("%AudioCaption")
 	var director: EncounterDirector = game.get("_director")
-	var values: Dictionary = get_root().get_node("Settings").get("_values")
+	var settings := get_root().get_node("Settings")
+	var values: Dictionary = settings.get("_values")
 	var attack_bar: Range = game.get_node("%DmjAttackBar")
 	captions.set_process(false)
 	attack_bar.show()
+	var old_scale: float = values.get("ui/scale", 1.0)
 	for dimensions: Vector2i in [
 		Vector2i(1920, 1080), Vector2i(960, 1700),
 		Vector2i(1280, 720), Vector2i(2560, 1080), Vector2i(720, 960),
+		Vector2i(390, 844), Vector2i(844, 390),
 	]:
-		viewport.size = dimensions
+		settings.call("set_value", "ui/scale",
+			1.5 if mini(dimensions.x, dimensions.y) < 400 else old_scale)
+		get_root().size = dimensions
+		await process_frame
+		await process_frame
 		values["accessibility/audio_captions"] = false
 		captions.hide()
 		console.show()
 		for _frame in range(4):
 			await process_frame
 		var panel := console.get_global_rect()
-		var screen := Rect2(Vector2.ZERO, Vector2(dimensions))
-		_check(screen.encloses(panel), "The console fits the %s viewport." % dimensions)
+		var screen := get_root().get_visible_rect()
+		var layout := "%s, Help %s, canvas %s" % [dimensions, expanded, screen.size]
+		_check(screen.encloses(panel), "Console %s must fit %s (minimum %s)." % [
+			panel, layout, console.get_combined_minimum_size()])
 		var top: Control = game.get_node("HUD/Overlay/Margins/Layout/TopBar")
-		_check(screen.encloses(top.get_global_rect()), "The top bar fits %s." % dimensions)
+		_check(screen.encloses(top.get_global_rect()), "Top bar %s must fit %s." % [
+			top.get_global_rect(), layout])
+		var combo := (game.get_node("%DmjComboGroup") as Control).get_global_rect()
+		var progress := (game.get_node("%DmjProgress") as Control).get_global_rect()
+		_check(screen.grow(0.5).encloses(combo) and not combo.intersects(progress),
+			"Combo %s must fit %s and clear wave progress %s." % [combo, layout, progress])
 		for name in [
 			"DmjTarget", "DmjPromptCaption", "DmjHeard",
 			"DmjFeedback", "DmjFeedbackDetail", "DmjStatus", "DmjThreat",
 		]:
 			var label: Label = game.get_node("%%%s" % name)
+			if not label.is_visible_in_tree():
+				continue
 			_check(
 				panel.grow(0.5).encloses(label.get_global_rect()),
 				"%s stays inside the console at %s." % [name, dimensions]
 			)
 		for name in ["DmjAttackBar", "DmjNoteStrip"]:
 			var meter: Range = game.get_node("%%%s" % name)
+			if not meter.is_visible_in_tree():
+				continue
 			_check(
 				panel.grow(0.5).encloses(meter.get_global_rect()),
 				"%s stays inside the console at %s." % [name, dimensions]
@@ -634,7 +653,8 @@ func _check_console_layouts(
 		var bounds: Rect2 = game.call("_playfield_bounds")
 		_check(
 			bounds.end.y + DmjDroneArt.foot_clearance(director.visual_scale) <= panel.position.y + 0.5,
-			"Drone feet clear the console at %s." % dimensions
+			"Drone feet (bounds %s, clearance %.2f) must clear console %s at %s." % [
+				bounds, DmjDroneArt.foot_clearance(director.visual_scale), panel, layout]
 		)
 		captions.custom_minimum_size.y = 64.0
 		values["accessibility/audio_captions"] = true
@@ -645,7 +665,9 @@ func _check_console_layouts(
 		bounds = game.call("_playfield_bounds")
 		_check(
 			bounds.end.y + DmjDroneArt.foot_clearance(director.visual_scale) <= captions.get_global_rect().position.y + 0.5,
-			"Audio captions also reserve playfield room at %s." % dimensions
+			"Audio caption %s must clear drone bounds %s (feet %.2f) at %s." % [
+				captions.get_global_rect(), bounds,
+				DmjDroneArt.foot_clearance(director.visual_scale), layout]
 		)
 		_check(
 			is_equal_approx(bounds.end.y, reserved.end.y),
@@ -671,6 +693,10 @@ func _check_console_layouts(
 				is_equal_approx(bounds.end.y, reserved.end.y),
 				"Attack-bar visibility does not move the firing floor at %s." % dimensions
 			)
+	settings.call("set_value", "ui/scale", old_scale)
+	if not expanded:
+		(game.get_node("%HudHelpButton") as Button).pressed.emit()
+		await _check_console_layouts(game, console, true)
 
 
 # --------------------------------------------------------------------------

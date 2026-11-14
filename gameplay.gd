@@ -169,6 +169,7 @@ func game_id() -> String:
 
 func _configure_mode_ui() -> void:
 	super()
+	_callout.show()
 	_player_one_card.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_life_rack.visible = _lives_mode
 	_mode_title.visible = not _lives_mode
@@ -197,6 +198,7 @@ func _build_playfield() -> void:
 	# carries. The readout owns the bottom of the screen here (§5.1), so the
 	# panel is folded into it — see [method _play_instruction].
 	_bottom_row.hide()
+	register_hud_controls(_prompt_root.controls_tray(), _prompt_root.refresh_layout, false)
 
 	# Stop both music crossfade voices before the microphone learns the room.
 	AudioManager.stop_music(0.0)

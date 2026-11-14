@@ -21,6 +21,7 @@ var _effects_enabled := true
 var _burn_left := 0.0
 var _burnt_from := 0
 var _pulse_time := 0.0
+var _hud_unit := 0.0
 
 
 func _ready() -> void:
@@ -64,6 +65,16 @@ func is_critical() -> bool:
 	return remaining_lives == 1 and not protected
 
 
+## Keep the actual tube pool readable without reserving a second header row.
+func fit_units(unit: float) -> void:
+	if is_equal_approx(_hud_unit, unit):
+		return
+	_hud_unit = unit
+	custom_minimum_size = Vector2(126, 38) * unit
+	_update_copy()
+	_refresh_layout()
+
+
 func _can_animate() -> bool:
 	return not _reduced_motion and _effects_enabled and not protected
 
@@ -93,6 +104,8 @@ func _update_copy() -> void:
 	_count.text = "%d / %d %s" % [
 		remaining_lives, capacity, "LIFE" if capacity == 1 else "LIVES",
 	]
+	if _hud_unit > 0.0:
+		_count.text = str(remaining_lives)
 	if protected:
 		_status.text = "DEMO / CIRCUIT PROTECTED"
 	elif remaining_lives == 0:
@@ -121,6 +134,16 @@ func _refresh_layout() -> void:
 	var wide := size.x >= WIDE_WIDTH
 	_heading.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	_status.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	if _hud_unit > 0.0:
+		_heading.get_node("Caption").hide()
+		_status.hide()
+		_heading.vertical = false
+		_count.add_theme_font_size_override("font_size", roundi(22 * _hud_unit))
+		_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_heading.position = Vector2.ZERO
+		_heading.size = Vector2(32 * _hud_unit, size.y)
+		queue_redraw()
+		return
 	_heading.vertical = wide
 	_count.add_theme_font_size_override("font_size", 30 if wide else 24)
 	_heading.position = Vector2(0.0, 4.0) if wide else Vector2.ZERO
@@ -138,7 +161,11 @@ func tube_rect(index: int) -> Rect2:
 	var bottom := _status.get_rect().position.y - 4.0
 	var area := Rect2(8.0, top, maxf(size.x - 16.0, 0.0), maxf(bottom - top, 0.0))
 	var max_zoom := 1.0
-	if size.x >= WIDE_WIDTH:
+	if _hud_unit > 0.0:
+		var left := 36 * _hud_unit
+		area = Rect2(left, 0, maxf(0, size.x - left), size.y)
+		max_zoom = _hud_unit
+	elif size.x >= WIDE_WIDTH:
 		var left := READOUT_WIDTH + 24.0
 		area = Rect2(left, 4.0, size.x - left - 8.0, maxf(size.y - 8.0, 0.0))
 		max_zoom = 1.75
