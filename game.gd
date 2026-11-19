@@ -146,6 +146,7 @@ static func manifest() -> GameManifest:
 static func _theme() -> GameTheme:
 	var theme := GameTheme.new()
 	theme.logo_texture_path = "res://games/dead_metal_jam/assets/game-icon.svg"
+	theme.cover_texture_path = "res://games/dead_metal_jam/assets/cover.png"
 	theme.logo_color = DmjPalette.AMBER
 	theme.plaque_color = DmjPalette.STEEL
 	theme.accent = DmjPalette.AMBER
